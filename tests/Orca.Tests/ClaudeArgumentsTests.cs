@@ -80,7 +80,26 @@ public class ClaudeArgumentsTests
 
         Assert.DoesNotContain("--model", argv);
         Assert.DoesNotContain("--max-budget-usd", argv);
+        Assert.DoesNotContain("--settings", argv);
     }
+
+    [Fact]
+    public void Settings_file_rides_as_the_last_flag()
+    {
+        // Safety layer 2: the permissions.deny payload, probed to survive --safe-mode.
+        var argv = ClaudeArguments.Build(Options() with
+        {
+            SettingsFilePath = "/repo/.orca/runs/p/01-x.attempt-1.settings.json",
+        });
+
+        Assert.Equal("/repo/.orca/runs/p/01-x.attempt-1.settings.json", argv[argv.IndexOf("--settings") + 1]);
+        Assert.Equal(argv.Count - 1, argv.IndexOf("--settings") + 1);
+    }
+
+    [Fact]
+    public void Rejects_a_blank_settings_path() =>
+        Assert.Throws<ExecutorException>(() =>
+            ClaudeArguments.Build(Options() with { SettingsFilePath = " " }));
 
     [Theory]
     [InlineData("")]

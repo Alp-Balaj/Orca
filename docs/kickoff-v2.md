@@ -4,7 +4,9 @@
 > machine's interactive `claude` subscription login and run through `ClaudeCodeExecutor`
 > (`--safe-mode`, not `--bare`; no `ANTHROPIC_API_KEY` anywhere), and structured output for
 > Planner/Reconciler/Verifier is a vault-file contract (§5.4) replacing the former
-> Messages-API forced-tool-use design. The deviation log and open items live in the vault
+> Messages-API forced-tool-use design. Safety layer 2 (§7) was re-based the same day, after
+> the step-5 probes, from `PreToolUse` deny hooks (suppressed by safe mode) onto `--settings`
+> `permissions.deny` rules, which survive safe mode and override the allowlist. The deviation log and open items live in the vault
 > plan (`orca-build`). The product name was finalized as **Orca** at session 1 (owner
 > approval of the kickoff proposal); this text retains the working name "orkestra"
 > throughout. Mapping: tool command `orca`, per-repo config `orca.json`, gitignored state
@@ -287,10 +289,15 @@ Three layers, all required, none optional:
 1. **Allowlist** (`--allowedTools`) — destructive commands (`dotnet ef database update`,
    `git push`, `rm`, etc.) are simply never in the allowlist for a checkpoint. Per §7.1,
    no git *write* commands of any kind are in the MVP allowlist.
-2. **Deny-list hooks** — use `PreToolUse` hooks (passed via `--settings` JSON in bare mode)
-   with `permissionDecision: "deny"` for destructive patterns. Deny rules hold even under
-   `bypassPermissions`, so this layer fails closed even if something upstream misconfigures
-   the allowlist.
+2. **Deny-list permission rules** — pass `--settings` JSON carrying `permissions.deny`
+   patterns (e.g. `Bash(git push*)`) for destructive commands; sourced from `orca.json`'s
+   `deniedTools` (union of global and repo lists, so a repo can add rules but never remove
+   machine-level ones). *Amended 2026-07-06 (step-5 probes, transcript fixtures in the
+   repo):* the original mechanism here — `PreToolUse` hooks with
+   `permissionDecision: "deny"` — is dead under `--safe-mode`, which suppresses even
+   explicitly-passed `--settings` hooks on 2.1.201. `permissions.deny` rules in the same
+   payload are honored and **win over `--allowedTools`**, so this layer still fails closed
+   when the allowlist is misconfigured.
 3. **Git as the sandbox** — every checkpoint runs on an isolated branch in the target
    repo. The human's approval step *is* reviewing the diff before merge. This is the layer
    to actually lean on hardest: even if layers 1 and 2 leak, nothing reaches the real

@@ -63,6 +63,26 @@ internal static class SchemaEnums
             $"invalid verdict '{value}' (expected pass|fail)"),
     };
 
+    internal static string ToYaml(PlanStatus value) => value switch
+    {
+        PlanStatus.Draft => "draft",
+        PlanStatus.Approved => "approved",
+        PlanStatus.InProgress => "in_progress",
+        PlanStatus.Blocked => "blocked",
+        PlanStatus.Complete => "complete",
+        _ => "abandoned",
+    };
+
+    internal static string ToYaml(CheckpointStatus value) => value switch
+    {
+        CheckpointStatus.Pending => "pending",
+        CheckpointStatus.InProgress => "in_progress",
+        CheckpointStatus.AwaitingReview => "awaiting_review",
+        CheckpointStatus.Complete => "complete",
+        CheckpointStatus.Rejected => "rejected",
+        _ => "blocked",
+    };
+
     internal static string ToYaml(GateOutcome value) =>
         value == GateOutcome.Pass ? "pass" : "fail";
 

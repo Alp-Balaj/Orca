@@ -33,6 +33,12 @@ public sealed record ClaudeInvocationOptions
     /// plumbed through regardless so config can wire it once that is settled.</summary>
     public decimal? MaxBudgetUsd { get; init; }
 
+    /// <summary>Path to a <c>--settings</c> JSON file carrying the
+    /// <c>permissions.deny</c> payload (safety layer 2). Callers generate it via
+    /// <c>PermissionSettings.ToJson</c> and place it under the run-log directory so every
+    /// attempt records the deny rules that were in force. Null omits the flag.</summary>
+    public string? SettingsFilePath { get; init; }
+
     /// <summary>Explicit path to the claude executable; null resolves from PATH. Also the
     /// test seam for process-mechanics tests.</summary>
     public string? ClaudeExecutable { get; init; }

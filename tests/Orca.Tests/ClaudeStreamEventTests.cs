@@ -85,6 +85,48 @@ public class ClaudeStreamEventTests
         Assert.Equal(0m, result.TotalCostUsd);
     }
 
+    [Fact]
+    public void Budget_kill_result_has_its_own_subtype_and_is_error()
+    {
+        // --max-budget-usd IS enforced under subscription auth (probed 2026-07-06):
+        // the run dies mid-checkpoint with a distinct subtype, so a budget kill is never
+        // conflated with a model refusal or a timeout.
+        var result = Fixture("budget-exceeded.ndjson").Select(ClaudeStreamEvent.Parse).Last().Result;
+
+        Assert.NotNull(result);
+        Assert.True(result.IsError);
+        Assert.Equal("error_max_budget_usd", result.Subtype);
+        Assert.True(result.TotalCostUsd > 0.05m);
+        Assert.Null(result.ResultText);
+    }
+
+    [Fact]
+    public void Permission_deny_rules_block_the_tool_call_not_the_run()
+    {
+        // Safety layer 2: permissions.deny via --settings survives --safe-mode and wins
+        // over --allowedTools. The denied call surfaces as an is_error tool_result while
+        // the run itself completes successfully.
+        var events = Fixture("denied-by-permission-rules.ndjson").Select(ClaudeStreamEvent.Parse).ToList();
+
+        Assert.Contains(events, e => e.Type == "user" && e.RawLine.Contains("has been denied"));
+        var result = events.Last().Result;
+        Assert.NotNull(result);
+        Assert.False(result.IsError);
+    }
+
+    [Fact]
+    public void Safe_mode_suppresses_settings_hooks_the_negative_that_shaped_layer_2()
+    {
+        // The same command under a --settings PreToolUse deny hook executed anyway —
+        // hooks are dead under --safe-mode on 2.1.201, which is why the deny list rides
+        // permissions.deny instead (spec §7 amendment, 2026-07-06).
+        var events = Fixture("safe-mode-hook-suppressed.ndjson").Select(ClaudeStreamEvent.Parse).ToList();
+
+        Assert.Contains(events, e => e.Type == "user" && e.RawLine.Contains("hello-from-probe"));
+        Assert.DoesNotContain(events, e => e.RawLine.Contains("orca-probe-deny-fired"));
+        Assert.False(events.Last().Result!.IsError);
+    }
+
     [Theory]
     [InlineData("not json at all")]
     [InlineData("[1, 2, 3]")]

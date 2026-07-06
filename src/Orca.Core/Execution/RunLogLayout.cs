@@ -38,6 +38,19 @@ public sealed class RunLogLayout
             Stderr = Path.Combine(directory, stem + ".stderr.txt"),
         };
     }
+
+    /// <summary>Where one attempt's generated <c>--settings</c> payload (the
+    /// <c>permissions.deny</c> rules in force) is written — input evidence beside the
+    /// attempt's logs, same id validation.</summary>
+    public string SettingsFile(string planId, string checkpointId, int attempt)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        VaultLayout.ValidateCheckpointId(checkpointId);
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+
+        return Path.Combine(RunsRoot, planId, $"{checkpointId}.attempt-{attempt}.settings.json");
+    }
 }
 
 /// <summary>The two files one invocation writes: the NDJSON event log and the raw

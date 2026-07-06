@@ -11,7 +11,7 @@ namespace Orca.Core.Execution;
 /// decision: a logged-out machine fails loudly via the CLI's own
 /// <c>authentication_failed</c> event (exit 1, <c>result.is_error: true</c> — see the
 /// logged-out fixture).</para></summary>
-public sealed class ClaudeCodeExecutor
+public sealed class ClaudeCodeExecutor : IClaudeExecutor
 {
     public async Task<ClaudeExecutionResult> ExecuteAsync(
         ClaudeInvocationOptions options,

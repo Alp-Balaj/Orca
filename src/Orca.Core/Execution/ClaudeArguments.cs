@@ -25,6 +25,8 @@ public static class ClaudeArguments
             throw new ExecutorException("model, when set, must be non-empty");
         if (options.MaxBudgetUsd is <= 0)
             throw new ExecutorException($"max budget, when set, must be positive, got {options.MaxBudgetUsd}");
+        if (options.SettingsFilePath is not null && string.IsNullOrWhiteSpace(options.SettingsFilePath))
+            throw new ExecutorException("settings file path, when set, must be non-empty");
 
         var argv = new List<string>
         {
@@ -55,6 +57,14 @@ public static class ClaudeArguments
         {
             argv.Add("--max-budget-usd");
             argv.Add(budget.ToString(CultureInfo.InvariantCulture));
+        }
+
+        // Deny rules survive --safe-mode via an explicit settings file and win over the
+        // allowlist (probed 2026-07-06 on 2.1.201) — PreToolUse hooks do not.
+        if (options.SettingsFilePath is not null)
+        {
+            argv.Add("--settings");
+            argv.Add(options.SettingsFilePath);
         }
 
         return argv;

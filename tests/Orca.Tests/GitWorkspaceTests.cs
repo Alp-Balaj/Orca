@@ -1,0 +1,157 @@
+using Orca.Core.Git;
+
+namespace Orca.Tests;
+
+public sealed class GitWorkspaceTests : IDisposable
+{
+    private readonly TempGitRepo _repo = new();
+
+    public void Dispose() => _repo.Dispose();
+
+    private GitWorkspace Workspace() => GitWorkspace.Discover(_repo.Root);
+
+    [Fact]
+    public void Discover_finds_the_toplevel_from_a_subdirectory()
+    {
+        var sub = Path.Combine(_repo.Root, "src", "deep");
+        Directory.CreateDirectory(sub);
+
+        var workspace = GitWorkspace.Discover(sub);
+
+        // Realpath both sides: macOS/Linux temp dirs are often symlinked.
+        Assert.Equal(new DirectoryInfo(_repo.Root).FullName,
+            new DirectoryInfo(workspace.RepoRoot).FullName);
+    }
+
+    [Fact]
+    public void Discover_refuses_a_directory_outside_any_repo()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "orca-not-a-repo-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outside);
+        try
+        {
+            Assert.Throws<GitException>(() => GitWorkspace.Discover(outside));
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Clean_tree_is_clean_and_untracked_files_count_as_dirty()
+    {
+        var workspace = Workspace();
+        Assert.True(workspace.IsClean());
+
+        _repo.WriteFile("new-file.txt", "untracked\n");
+        Assert.False(workspace.IsClean());
+        Assert.Contains(workspace.StatusLines(), line => line.Contains("new-file.txt"));
+    }
+
+    [Fact]
+    public void Creates_the_checkpoint_branch_from_the_base_and_switches_to_it()
+    {
+        var workspace = Workspace();
+
+        workspace.CreateBranchFrom("orca/recipe-tagging/01-tag-entity", "main");
+
+        Assert.Equal("orca/recipe-tagging/01-tag-entity", workspace.CurrentBranch());
+        Assert.True(workspace.BranchExists("orca/recipe-tagging/01-tag-entity"));
+    }
+
+    [Fact]
+    public void Refuses_to_branch_from_a_dirty_tree()
+    {
+        _repo.WriteFile("dirty.txt", "x\n");
+
+        var e = Assert.Throws<GitException>(() =>
+            Workspace().CreateBranchFrom("orca/p/01-c", "main"));
+        Assert.Contains("not clean", e.Message);
+    }
+
+    [Fact]
+    public void Refuses_a_missing_base_branch()
+    {
+        var e = Assert.Throws<GitException>(() =>
+            Workspace().CreateBranchFrom("orca/p/01-c", "does-not-exist"));
+        Assert.Contains("does-not-exist", e.Message);
+    }
+
+    [Fact]
+    public void Refuses_to_recreate_an_existing_branch()
+    {
+        var workspace = Workspace();
+        workspace.CreateBranchFrom("orca/p/01-c", "main");
+        workspace.SwitchTo("main");
+
+        var e = Assert.Throws<GitException>(() => workspace.CreateBranchFrom("orca/p/01-c", "main"));
+        Assert.Contains("already exists", e.Message);
+    }
+
+    [Fact]
+    public void Commit_on_approval_stages_everything_and_carries_the_message()
+    {
+        var workspace = Workspace();
+        workspace.CreateBranchFrom("orca/p/01-c", "main");
+        _repo.WriteFile("src/Feature.cs", "// new\n");
+        _repo.WriteFile("README.md", "seed\nchanged\n");
+
+        var message = "orca: p/01-c attempt 1\n\nPlan: p v1";
+        var sha = workspace.StageAllAndCommit(message);
+
+        Assert.True(workspace.IsClean());
+        Assert.Matches("^[0-9a-f]{40}$", sha);
+        Assert.StartsWith("orca: p/01-c attempt 1", _repo.Git("log", "-1", "--format=%B"));
+    }
+
+    [Fact]
+    public void Commit_with_nothing_to_commit_fails_loudly()
+    {
+        var e = Assert.Throws<GitException>(() => Workspace().StageAllAndCommit("orca: x"));
+        Assert.Contains("nothing to commit", e.Message);
+    }
+
+    [Fact]
+    public void Discard_removes_tracked_modifications_and_untracked_files()
+    {
+        var workspace = Workspace();
+        workspace.CreateBranchFrom("orca/p/01-c", "main");
+        _repo.WriteFile("README.md", "tracked modification\n");
+        _repo.WriteFile("junk/new.txt", "untracked\n");
+
+        workspace.DiscardAllChanges();
+
+        Assert.True(workspace.IsClean());
+        Assert.Equal("seed\n", File.ReadAllText(Path.Combine(_repo.Root, "README.md")));
+        Assert.False(File.Exists(Path.Combine(_repo.Root, "junk/new.txt")));
+    }
+
+    [Fact]
+    public void Discard_leaves_gitignored_run_evidence_alone()
+    {
+        // The rejection path must never delete run logs: .orca/ is ignored, and
+        // `git clean -fd` (no -x) skips ignored files.
+        var workspace = Workspace();
+        _repo.WriteFile(".gitignore", ".orca/\n");
+        _repo.Git("add", "-A");
+        _repo.Git("commit", "-m", "ignore .orca");
+        _repo.WriteFile(".orca/runs/p/01-c.attempt-1.ndjson", "{\"type\":\"system\"}\n");
+        _repo.WriteFile("junk.txt", "discard me\n");
+
+        workspace.DiscardAllChanges();
+
+        Assert.True(File.Exists(Path.Combine(_repo.Root, ".orca/runs/p/01-c.attempt-1.ndjson")));
+        Assert.False(File.Exists(Path.Combine(_repo.Root, "junk.txt")));
+    }
+
+    [Fact]
+    public void Switch_refuses_a_dirty_tree()
+    {
+        var workspace = Workspace();
+        workspace.CreateBranchFrom("orca/p/01-c", "main");
+        _repo.WriteFile("wip.txt", "x\n");
+
+        Assert.Throws<GitException>(() => workspace.SwitchTo("main"));
+    }
+}
