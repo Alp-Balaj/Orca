@@ -83,6 +83,9 @@ internal static class SchemaEnums
         _ => "blocked",
     };
 
+    internal static string ToYaml(PlanningStrategyKind value) =>
+        value == PlanningStrategyKind.SingleCandidate ? "single_candidate" : "multi_candidate";
+
     internal static string ToYaml(GateOutcome value) =>
         value == GateOutcome.Pass ? "pass" : "fail";
 

@@ -75,6 +75,7 @@ public class ClaudeCliContractTests : IDisposable
                 PromptHashes = new Dictionary<string, string>(),
                 AccumulatedCostUsd = 0m,
                 LastUsage = null,
+                LastStopReason = null,
                 StartedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow,
             },

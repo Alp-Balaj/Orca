@@ -41,6 +41,8 @@ Process-mechanics tests (timeout kill, resolver) run by default and skip visibly
 ## Commands
 
     orca plan-init <plan-id> --title <title> [--base-branch main] [--repo <path>]
+    orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
+                       [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
     orca status [--plan <id>] [--repo <path>]
 
@@ -50,6 +52,23 @@ invocation, then an Approve / Reject / Defer prompt. Approve commits with a stru
 message; Reject *offers* a hard reset (never automatic); Defer leaves the decision, and
 the next `checkpoint-run` resumes it instead of paying for a new invocation. `--dry-run`
 prints the branch, assembled prompt, and exact argv without mutating anything.
+
+`plan-generate` runs the Planner: one `claude -p` invocation, working directory = the
+vault, scoped by `roles.planner`, that must write a schema-valid **draft** plan file
+(`prompts/planner.md` carries the exact contract; the Planner can never self-approve).
+The produced file is parsed by the real plan parser; a parse/validation failure feeds a
+capped Reflexion-style retry (`maxParseRetries`) whose prompt quotes the exact error.
+How much deliberation a plan deserves is your call — `--strategy` or an interactive
+prompt, never auto-decided; multi-candidate is deferred until the implementer loop is
+proven, and choosing it refuses clearly. `--dry-run` is strictly zero-mutation.
+
+Every invocation is classified from observed evidence into a **stop reason** —
+`succeeded | auth_failed | rate_limited | budget_exceeded | timed_out | failed` —
+recorded in the run log's `process_exit` event, in run state (`lastStopReason`), and
+per-attempt in planning state (`.orca/state/<plan-id>.planning.json`). Auth expiry,
+rate limiting, budget kills, and timeouts fail the attempt loudly and are **never
+retried automatically**: re-run later and attempt numbering resumes. All four roles
+share one subscription window; only parse failures of a role's output file retry.
 
 ## Configuration
 
@@ -76,6 +95,9 @@ safe mode and are not used). There is **no auth field and no API-key field** any
 Note: under subscription auth, a configured `model` the plan doesn't offer fails at
 invocation time, not config-load time — the run summary surfaces the CLI's own message.
 
+`maxParseRetries` (the §5.4 structured-output retry ceiling) is required the first time
+`plan-generate` runs; roles only need to be configured when they are actually invoked.
+
 ## Auth & secrets
 
 There are none to manage. All four roles (Planner, Implementer, Reconciler, Verifier) run
@@ -88,8 +110,10 @@ credential check.
 
 ## Status
 
-Build order (`docs/kickoff-v2.md` §9): **steps 1–5 complete** — scaffold, domain model +
+Build order (`docs/kickoff-v2.md` §9): **steps 1–6 complete** — scaffold, domain model +
 strict frontmatter parsers, vault reader/writer, `ClaudeCodeExecutor` on the empirically
 captured 2.1.201 stream contract (fixtures in `tests/Orca.Tests/Fixtures/Transcripts/`),
-and config loading + git mechanics + the `plan-init`/`checkpoint-run`/`status` commands.
-Next session: step 6, `IPlanningStrategy` with the single-candidate path.
+config loading + git mechanics + the `plan-init`/`checkpoint-run`/`status` commands, and
+`IPlanningStrategy` with the single-candidate Planner (`plan-generate`) plus the
+stop-reason contract for shared-subscription failure modes. Next session: step 7,
+Reconciler and the two-layer Verifier.

@@ -22,6 +22,7 @@ public class RunStateTests
         },
         AccumulatedCostUsd = 1.37m,
         LastUsage = null,
+        LastStopReason = null,
         StartedAt = new DateTimeOffset(2026, 7, 6, 14, 0, 0, TimeSpan.Zero),
         UpdatedAt = new DateTimeOffset(2026, 7, 6, 16, 5, 0, TimeSpan.Zero),
     };
@@ -65,6 +66,17 @@ public class RunStateTests
 
         Assert.Equal(state.LastUsage, restored.LastUsage);
         Assert.Equal(json, RunStateSerializer.ToJson(restored));
+    }
+
+    [Fact]
+    public void Round_trips_the_stop_reason_as_snake_case()
+    {
+        var state = Sample() with { LastStopReason = InvocationStopReason.RateLimited };
+
+        var json = RunStateSerializer.ToJson(state);
+
+        Assert.Contains("\"lastStopReason\": \"rate_limited\"", json);
+        Assert.Equal(InvocationStopReason.RateLimited, RunStateSerializer.FromJson(json).LastStopReason);
     }
 
     [Fact]

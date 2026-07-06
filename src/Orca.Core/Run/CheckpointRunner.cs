@@ -161,6 +161,7 @@ public sealed class CheckpointRunner(
             PromptHashes = new Dictionary<string, string> { ["implementer"] = preview.PromptSha256 },
             AccumulatedCostUsd = previous?.AccumulatedCostUsd ?? 0m,
             LastUsage = previous?.LastUsage,
+            LastStopReason = previous?.LastStopReason,
             StartedAt = previous?.StartedAt ?? now,
             UpdatedAt = now,
         };

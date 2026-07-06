@@ -1,10 +1,12 @@
+using Orca.Core.Domain;
 using Orca.Core.Execution;
 
 namespace Orca.Tests;
 
 /// <summary>Process mechanics only — no quota. The timeout test launches the real CLI
-/// and kills it in 250ms, long before any API response; the failure-path tests never
-/// spawn at all. The full billed loop lives in <see cref="ClaudeCliContractTests"/>.</summary>
+/// and kills it in 250ms, long before any API response; the fixture-replay tests spawn a
+/// stand-in script that cats a captured transcript; the failure-path tests never spawn at
+/// all. The full billed loop lives in <see cref="ClaudeCliContractTests"/>.</summary>
 public class ClaudeCodeExecutorTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("orca-executor-tests-").FullName;
@@ -22,6 +24,67 @@ public class ClaudeCodeExecutorTests : IDisposable
 
     private RunLogPaths Paths(int attempt = 1) =>
         new RunLogLayout(_dir).AttemptPaths("orca-build", "04-claude-code-executor", attempt);
+
+    /// <summary>An OS-appropriate script that replays a captured transcript on stdout
+    /// and exits with the fixture's real exit code — full stream mechanics, no CLI, no
+    /// quota.</summary>
+    private string FakeCliReplaying(string fixtureName, int exitCode)
+    {
+        var fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Transcripts", fixtureName);
+        if (OperatingSystem.IsWindows())
+        {
+            var cmd = Path.Combine(_dir, "fake-claude.cmd");
+            File.WriteAllText(cmd, $"@echo off\r\ntype \"{fixture}\"\r\nexit /b {exitCode}\r\n");
+            return cmd;
+        }
+
+        var sh = Path.Combine(_dir, "fake-claude.sh");
+        File.WriteAllText(sh, $"#!/bin/sh\ncat \"{fixture}\"\nexit {exitCode}\n");
+        File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return sh;
+    }
+
+    [Fact]
+    public async Task Auth_failure_replay_is_classified_and_logged_distinctly()
+    {
+        var options = Options() with
+        {
+            ClaudeExecutable = FakeCliReplaying("logged-out.ndjson", exitCode: 1),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        var paths = Paths();
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, paths);
+
+        Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
+        Assert.Equal(1, result.ExitCode);
+        Assert.True(result.AuthenticationFailed);
+        Assert.Equal(InvocationStopReason.AuthFailed, result.StopReason);
+
+        // Recorded distinctly in the run log too (the approved stop-reason contract).
+        var log = File.ReadAllLines(paths.EventLog);
+        Assert.Contains(log, l => l.Contains("\"process_exit\"") && l.Contains("\"stop_reason\":\"auth_failed\""));
+    }
+
+    [Fact]
+    public async Task Healthy_replay_succeeds_and_captures_the_allowed_rate_limit_evidence()
+    {
+        var options = Options() with
+        {
+            ClaudeExecutable = FakeCliReplaying("success.ndjson", exitCode: 0),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        var paths = Paths(attempt: 2);
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, paths);
+
+        Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
+        Assert.False(result.AuthenticationFailed);
+        Assert.Equal("allowed", result.LastRateLimit?.Status);
+
+        var log = File.ReadAllLines(paths.EventLog);
+        Assert.Contains(log, l => l.Contains("\"process_exit\"") && l.Contains("\"stop_reason\":\"succeeded\""));
+    }
 
     [ClaudeCliFact]
     public async Task Timeout_is_a_hard_kill_reported_distinctly_from_exit()

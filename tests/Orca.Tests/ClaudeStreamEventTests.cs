@@ -42,6 +42,49 @@ public class ClaudeStreamEventTests
     }
 
     [Fact]
+    public void Rate_limit_event_yields_the_rate_limit_info_evidence()
+    {
+        // A healthy run's rate_limit_event says "allowed" — presence is not failure;
+        // the status is the classification signal (checkpoint 06 stop-reason contract).
+        var rateLimit = Fixture("success.ndjson").Select(ClaudeStreamEvent.Parse)
+            .Single(e => e.Type == "rate_limit_event").RateLimit;
+
+        Assert.NotNull(rateLimit);
+        Assert.Equal("allowed", rateLimit.Status);
+        Assert.Equal(1783361400, rateLimit.ResetsAt);
+        Assert.Equal("five_hour", rateLimit.RateLimitType);
+    }
+
+    [Fact]
+    public void Rate_limit_event_without_readable_info_is_no_signal_not_a_crash()
+    {
+        // The event is undocumented diagnostics: shape drift yields null evidence (the
+        // raw line is in the run log regardless), unlike the strict result contract.
+        Assert.Null(ClaudeStreamEvent.Parse("{\"type\":\"rate_limit_event\"}").RateLimit);
+        Assert.Null(ClaudeStreamEvent.Parse(
+            "{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"resetsAt\":1}}").RateLimit);
+        Assert.Null(ClaudeStreamEvent.Parse(
+            "{\"type\":\"assistant\",\"rate_limit_info\":{\"status\":\"allowed\"}}").RateLimit);
+    }
+
+    [Fact]
+    public void Authentication_failure_rides_a_machine_readable_error_field()
+    {
+        // Both auth fixtures carry error:"authentication_failed" on a synthetic
+        // assistant event — the classification signal, since the result event hides
+        // auth failures behind subtype "success".
+        foreach (var fixture in new[] { "logged-out.ndjson", "invalid-api-key.ndjson" })
+        {
+            var events = Fixture(fixture).Select(ClaudeStreamEvent.Parse).ToList();
+            Assert.Contains(events, e => e.Type == "assistant" && e.Error == "authentication_failed");
+        }
+
+        Assert.DoesNotContain(
+            Fixture("success.ndjson").Select(ClaudeStreamEvent.Parse),
+            e => e.Error is not null);
+    }
+
+    [Fact]
     public void Result_event_yields_cost_usage_and_turns()
     {
         var result = Fixture("success.ndjson").Select(ClaudeStreamEvent.Parse).Last().Result;

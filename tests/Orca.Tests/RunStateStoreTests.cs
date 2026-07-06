@@ -38,6 +38,7 @@ public sealed class RunStateStoreTests : IDisposable
         PromptHashes = new Dictionary<string, string> { ["implementer"] = "abc" },
         AccumulatedCostUsd = 0m,
         LastUsage = null,
+        LastStopReason = null,
         StartedAt = new DateTimeOffset(2026, 7, 6, 18, 0, 0, TimeSpan.Zero),
         UpdatedAt = new DateTimeOffset(2026, 7, 6, 18, 0, 0, TimeSpan.Zero),
     };

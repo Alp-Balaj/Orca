@@ -158,6 +158,9 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
         var e = outcome.Execution;
         var table = new Table().HideHeaders().Border(TableBorder.None).AddColumns("k", "v");
         table.AddRow("outcome", e.Outcome == ExecutionOutcome.TimedOut ? "[red]timed out (killed)[/]" : "completed");
+        table.AddRow("stop reason", e.StopReason == Orca.Core.Domain.InvocationStopReason.Succeeded
+            ? "succeeded"
+            : $"[red]{InvocationStopReasons.ToWire(e.StopReason).EscapeMarkup()}[/]");
         table.AddRow("exit code", e.ExitCode.ToString());
         if (e.Result is { } r)
         {

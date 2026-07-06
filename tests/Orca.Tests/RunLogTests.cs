@@ -29,6 +29,33 @@ public class RunLogLayoutTests
     public void Rejects_a_non_positive_attempt() =>
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new RunLogLayout("/repo").AttemptPaths("recipe-tagging", "01-tag-entity", 0));
+
+    [Fact]
+    public void Planning_attempts_live_beside_the_checkpoint_logs()
+    {
+        var layout = new RunLogLayout("/repo");
+        var paths = layout.PlanningAttemptPaths("recipe-tagging", 3);
+
+        // The "planning" stem cannot collide with a checkpoint id (those always start
+        // with a two-digit prefix).
+        var expectedDir = Path.Combine(Path.GetFullPath("/repo"), ".orca", "runs", "recipe-tagging");
+        Assert.Equal(Path.Combine(expectedDir, "planning.attempt-3.ndjson"), paths.EventLog);
+        Assert.Equal(Path.Combine(expectedDir, "planning.attempt-3.stderr.txt"), paths.Stderr);
+        Assert.Equal(
+            Path.Combine(expectedDir, "planning.attempt-3.settings.json"),
+            layout.PlanningSettingsFile("recipe-tagging", 3));
+    }
+
+    [Fact]
+    public void Planning_paths_hold_the_same_id_and_attempt_discipline()
+    {
+        Assert.ThrowsAny<ArgumentException>(() =>
+            new RunLogLayout("/repo").PlanningAttemptPaths("../escape", 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new RunLogLayout("/repo").PlanningAttemptPaths("recipe-tagging", 0));
+        Assert.ThrowsAny<ArgumentException>(() =>
+            new RunLogLayout("/repo").PlanningSettingsFile("../escape", 1));
+    }
 }
 
 public class RunLogWriterTests : IDisposable

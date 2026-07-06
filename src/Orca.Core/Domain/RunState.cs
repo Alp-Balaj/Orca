@@ -29,6 +29,12 @@ public sealed record RunState
     /// checkpoint 04 (criterion: "usage … extracted into run state").</summary>
     public required TokenUsage? LastUsage { get; init; }
 
+    /// <summary>Why the most recent invocation stopped; null until the first invocation
+    /// completes. Added by checkpoint 06 (the rate-limit/auth-expiry contract): a
+    /// quota-exhausted or auth-expired attempt must be recorded distinctly, never
+    /// conflated with a refusal or a timeout kill.</summary>
+    public required InvocationStopReason? LastStopReason { get; init; }
+
     public required DateTimeOffset StartedAt { get; init; }
     public required DateTimeOffset UpdatedAt { get; init; }
 }
@@ -39,6 +45,8 @@ public static class RunStateSerializer
     {
         WriteIndented = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        // Same snake_case spellings as the run log's stop_reason field.
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) },
     };
 
     public static string ToJson(RunState state) => JsonSerializer.Serialize(state, Options);

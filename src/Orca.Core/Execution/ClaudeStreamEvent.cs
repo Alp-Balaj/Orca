@@ -18,6 +18,15 @@ public sealed record ClaudeStreamEvent
     /// <summary>Non-null iff <see cref="Type"/> is <c>result</c>.</summary>
     public ClaudeResultSummary? Result { get; init; }
 
+    /// <summary>Top-level <c>error</c> field — observed as <c>"authentication_failed"</c>
+    /// on the synthetic <c>assistant</c> event both auth fixtures carry. Machine-readable
+    /// auth evidence, unlike the human-facing <c>result</c> text.</summary>
+    public string? Error { get; init; }
+
+    /// <summary>Non-null iff <see cref="Type"/> is <c>rate_limit_event</c> and the event
+    /// carried a readable <c>rate_limit_info.status</c>.</summary>
+    public RateLimitInfo? RateLimit { get; init; }
+
     /// <summary>The line exactly as received; the run log holds it verbatim.</summary>
     public required string RawLine { get; init; }
 
@@ -41,7 +50,35 @@ public sealed record ClaudeStreamEvent
             Subtype = subtype,
             SessionId = sessionId,
             Result = type == "result" ? ClaudeResultSummary.Parse(root, line) : null,
+            Error = StreamJson.OptionalString(root, "error"),
+            RateLimit = type == "rate_limit_event" ? RateLimitInfo.Parse(root) : null,
             RawLine = line,
+        };
+    }
+}
+
+/// <summary>The fields Orca reads from a <c>rate_limit_event</c>'s <c>rate_limit_info</c>
+/// block. This event is undocumented diagnostic output that appears in perfectly healthy
+/// runs (<c>status: "allowed"</c> in every capture), so unlike the <c>result</c> contract
+/// it is read leniently: a shape drift yields no signal rather than crashing a successful
+/// run — the raw line is in the run log either way.</summary>
+public sealed record RateLimitInfo
+{
+    public required string Status { get; init; }
+    public long? ResetsAt { get; init; }
+    public string? RateLimitType { get; init; }
+
+    internal static RateLimitInfo? Parse(JsonElement root)
+    {
+        if (!root.TryGetProperty("rate_limit_info", out var info) || info.ValueKind != JsonValueKind.Object)
+            return null;
+        if (StreamJson.OptionalString(info, "status") is not { } status)
+            return null;
+        return new RateLimitInfo
+        {
+            Status = status,
+            ResetsAt = StreamJson.OptionalLong(info, "resetsAt"),
+            RateLimitType = StreamJson.OptionalString(info, "rateLimitType"),
         };
     }
 }
@@ -110,6 +147,12 @@ internal static class StreamJson
     internal static string? OptionalString(JsonElement parent, string name) =>
         parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
+            : null;
+
+    internal static long? OptionalLong(JsonElement parent, string name) =>
+        parent.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+        && value.TryGetInt64(out var number)
+            ? number
             : null;
 
     internal static int? OptionalInt(JsonElement parent, string name) =>

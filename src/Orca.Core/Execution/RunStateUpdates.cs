@@ -13,6 +13,7 @@ public static class RunStateUpdates
             SessionId = execution.SessionId ?? state.SessionId,
             AccumulatedCostUsd = state.AccumulatedCostUsd + (execution.Result?.TotalCostUsd ?? 0m),
             LastUsage = execution.Result?.Usage ?? state.LastUsage,
+            LastStopReason = execution.StopReason,
             UpdatedAt = now,
         };
 }

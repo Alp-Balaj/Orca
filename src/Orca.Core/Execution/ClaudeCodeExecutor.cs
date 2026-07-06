@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Orca.Core.Domain;
 
 namespace Orca.Core.Execution;
 
@@ -51,6 +52,8 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
 
         string? sessionId = null;
         ClaudeResultSummary? result = null;
+        var authenticationFailed = false;
+        RateLimitInfo? lastRateLimit = null;
         StreamParseException? parseFailure = null;
 
         // Log-before-parse, and keep draining after a parse failure: the pipe must not
@@ -69,6 +72,10 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
                         sessionId ??= streamEvent.SessionId;
                     if (streamEvent.Result is not null)
                         result = streamEvent.Result;
+                    if (streamEvent.Error == "authentication_failed")
+                        authenticationFailed = true;
+                    if (streamEvent.RateLimit is not null)
+                        lastRateLimit = streamEvent.RateLimit;
                 }
                 catch (StreamParseException e)
                 {
@@ -122,11 +129,23 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             });
         }
 
+        var execution = new ClaudeExecutionResult
+        {
+            Outcome = timedOut ? ExecutionOutcome.TimedOut : ExecutionOutcome.Completed,
+            ExitCode = process.ExitCode,
+            SessionId = sessionId,
+            Result = result,
+            AuthenticationFailed = authenticationFailed,
+            LastRateLimit = lastRateLimit,
+            Elapsed = stopwatch.Elapsed,
+        };
+
         runLog.WriteExecutorEvent("process_exit", new Dictionary<string, object?>
         {
             ["exit_code"] = process.ExitCode,
             ["elapsed_ms"] = stopwatch.ElapsedMilliseconds,
             ["timed_out"] = timedOut,
+            ["stop_reason"] = InvocationStopReasons.ToWire(execution.StopReason),
         });
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -140,14 +159,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             throw parseFailure;
         }
 
-        return new ClaudeExecutionResult
-        {
-            Outcome = timedOut ? ExecutionOutcome.TimedOut : ExecutionOutcome.Completed,
-            ExitCode = process.ExitCode,
-            SessionId = sessionId,
-            Result = result,
-            Elapsed = stopwatch.Elapsed,
-        };
+        return execution;
     }
 }
 
@@ -172,4 +184,17 @@ public sealed record ClaudeExecutionResult
     public required string? SessionId { get; init; }
     public required ClaudeResultSummary? Result { get; init; }
     public required TimeSpan Elapsed { get; init; }
+
+    /// <summary>True when any stream event carried <c>error: "authentication_failed"</c> —
+    /// the machine-readable auth signal (the <c>result</c> event hides auth failures
+    /// behind <c>subtype: "success"</c>).</summary>
+    public bool AuthenticationFailed { get; init; }
+
+    /// <summary>The last <c>rate_limit_event</c> observed, if any — healthy runs emit
+    /// these too (<c>status: "allowed"</c>), so presence alone is not a failure.</summary>
+    public RateLimitInfo? LastRateLimit { get; init; }
+
+    /// <summary>Derived, never stored separately, so it can't disagree with the
+    /// evidence.</summary>
+    public InvocationStopReason StopReason => InvocationStopReasons.Classify(this);
 }

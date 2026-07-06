@@ -20,6 +20,7 @@ public class RunStateUpdatesTests
         PromptHashes = new Dictionary<string, string>(),
         AccumulatedCostUsd = 1.00m,
         LastUsage = null,
+        LastStopReason = null,
         StartedAt = Now.AddHours(-1),
         UpdatedAt = Now.AddHours(-1),
     };
@@ -58,6 +59,25 @@ public class RunStateUpdatesTests
         Assert.Equal(206, updated.LastUsage!.OutputTokens);
         Assert.Equal(Now, updated.UpdatedAt);
         Assert.Equal(State().StartedAt, updated.StartedAt);
+    }
+
+    [Fact]
+    public void Stop_reason_lands_in_run_state_distinctly()
+    {
+        // The checkpoint-06 contract: a rate-limited attempt is recorded as exactly
+        // that — never conflated with a refusal or a timeout kill.
+        Assert.Equal(InvocationStopReason.Succeeded,
+            RunStateUpdates.Apply(State(), Completed(), Now).LastStopReason);
+
+        var rateLimited = Completed() with
+        {
+            ExitCode = 1,
+            Result = Completed().Result! with { IsError = true },
+            LastRateLimit = new RateLimitInfo { Status = "rejected" },
+        };
+
+        Assert.Equal(InvocationStopReason.RateLimited,
+            RunStateUpdates.Apply(State(), rateLimited, Now).LastStopReason);
     }
 
     [Fact]

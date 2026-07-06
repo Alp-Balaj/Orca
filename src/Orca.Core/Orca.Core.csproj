@@ -4,4 +4,11 @@
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Role prompts stay versioned at /prompts (spec: prompts as files) and ride into
+         the assembly so the packed `orca` tool carries them; the recorded prompt-file
+         hash is of this embedded content. -->
+    <EmbeddedResource Include="../../prompts/planner.md" LogicalName="Orca.Core.Prompts.planner.md" />
+  </ItemGroup>
+
 </Project>
