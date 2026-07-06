@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Orca.Cli/Orca.Cli.csproj" />
+    <Project Path="src/Orca.Core/Orca.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Orca.Tests/Orca.Tests.csproj" />
+  </Folder>
+</Solution>
