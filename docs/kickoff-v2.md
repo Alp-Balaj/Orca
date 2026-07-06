@@ -1,10 +1,16 @@
-> **Provenance:** As-received implementation kickoff spec (v2), delivered 2026-07-06.
-> The product name was finalized as **Orca** at session 1 (owner approval of the kickoff
-> proposal); this text retains the working name "orkestra" throughout. Mapping: tool
-> command `orca`, per-repo config `orca.json`, gitignored state dir `.orca/`, branch
-> prefix `orca/{plan-id}/{checkpoint-id}`. Approved schemas live in code
-> (`src/Orca.Core/Domain`, `src/Orca.Core/Vault`); this document is the architectural
-> source of truth.
+> **Provenance:** Implementation kickoff spec (v2), delivered 2026-07-06; amended the same
+> day by owner decision after the step-4 auth findings and the subscription-auth review:
+> all four roles (Planner, Implementer, Reconciler, Verifier) authenticate via the
+> machine's interactive `claude` subscription login and run through `ClaudeCodeExecutor`
+> (`--safe-mode`, not `--bare`; no `ANTHROPIC_API_KEY` anywhere), and structured output for
+> Planner/Reconciler/Verifier is a vault-file contract (§5.4) replacing the former
+> Messages-API forced-tool-use design. The deviation log and open items live in the vault
+> plan (`orca-build`). The product name was finalized as **Orca** at session 1 (owner
+> approval of the kickoff proposal); this text retains the working name "orkestra"
+> throughout. Mapping: tool command `orca`, per-repo config `orca.json`, gitignored state
+> dir `.orca/`, branch prefix `orca/{plan-id}/{checkpoint-id}`. Approved schemas live in
+> code (`src/Orca.Core/Domain`, `src/Orca.Core/Vault`); this document is the architectural
+> source of truth, kept in sync with the vault copy.
 
 # Orkestra — Implementation Kickoff (v2)
 
@@ -22,7 +28,8 @@ Orkestra is a **workflow**, not an autonomous agent. A human (the owner) reviews
 approves at every checkpoint. The only agentic component is Claude Code itself, running
 inside a tightly scoped sandbox for the duration of a single checkpoint. Everything above
 that — planning, sequencing, reconciliation, verification, gating — is deterministic C#
-code plus prompted LLM calls with typed, forced-tool-use outputs. Do not build anything
+code plus prompted `claude -p` invocations that write typed, schema-validated output files
+into the vault. Do not build anything
 that runs unattended across multiple checkpoints without human sign-off in between.
 
 The defensible, novel part of this project is **the vault schema, the checkpoint gating,
@@ -61,13 +68,15 @@ spec with reasons.
   (RecipeApp) — ask for it if the build hits that error rather than debugging from
   scratch.
 - **SDK:** .NET 10.
-- **Claude Code CLI:** installed and available as `claude`. Authentication for headless
-  bare-mode invocations comes from `ANTHROPIC_API_KEY` in the environment (bare mode skips
-  OAuth/keychain). Pin and record the installed Claude Code version in the repo README —
-  the CLI surface moves fast.
-- The executor integration test (§6) requires the real `claude` binary and an API key.
-  Mark it with an explicit xUnit trait (e.g. `[Trait("Category", "Integration")]`) so
-  default `dotnet test` runs exclude it and it is run deliberately.
+- **Claude Code CLI:** installed and available as `claude`. All four roles (Planner,
+  Implementer, Reconciler, Verifier) authenticate via the machine's interactive `claude`
+  subscription login — no `ANTHROPIC_API_KEY` is required anywhere in this tool. Pin and
+  record the installed Claude Code version in the repo README — the CLI surface moves
+  fast.
+- The executor integration test (§6) requires the real `claude` binary, logged in on the
+  machine running it. Mark it with an explicit xUnit trait (e.g.
+  `[Trait("Category", "Integration")]`) so default `dotnet test` runs exclude it and it is
+  run deliberately.
 
 ## 2. Repository structure
 
@@ -103,10 +112,10 @@ orkestra/
 
 - **Testing:** xUnit.
 - **YAML:** YamlDotNet (frontmatter only — the markdown body is passed through opaque).
-- **Anthropic client:** hand-rolled on `HttpClient` + `System.Text.Json` inside Core. No
-  third-party SDK dependency — there is no official .NET SDK, the surface orkestra needs
-  (messages endpoint, forced tool use, streaming off) is small, and owning it outright
-  matches the project's ethos. Wrap it behind a minimal interface so tests can fake it.
+- **No Anthropic API client.** All four roles (Planner, Implementer, Reconciler,
+  Verifier) go through the same `ClaudeCodeExecutor` process wrapper (§6) — a scoped
+  `claude -p` invocation differing only in prompt, tool allowlist, and expected output
+  file. There is no Messages API integration anywhere in this codebase.
 - **CLI parsing + terminal UX:** Spectre.Console + Spectre.Console.Cli (default, pending
   §11 confirmation). Orkestra's UX is dominated by confirmation prompts, diff summaries,
   and status tables — Spectre's prompt/render primitives fit that better than
@@ -122,23 +131,27 @@ Orkestra touches three distinct roots. All three must be configurable, never har
    records.
 
 Configuration lives in an `orkestra.json` file at the target repo's root (per-project
-settings: vault plan directory, build command, test command, allowed tools, model IDs
-per role) plus global defaults in the standard XDG/AppData location for the current OS.
-Model IDs, candidate count N for multi-candidate planning, `--max-turns`, wall-clock
-timeout, and cost ceilings all belong in this config — do not hardcode them. The only
-things that should be hardcoded are the plan-file schema itself and the stream-json
-event contract (§6), and the latter only via the contract test.
+settings: vault plan directory, build command, test command, an allowed-tools list **per
+role** — Planner/Reconciler/Verifier get vault-write-only tools, Implementer gets its
+per-checkpoint allowlist (§7) — and a model ID per role) plus global defaults in the
+standard XDG/AppData location for the current OS. Model IDs, candidate count N for
+multi-candidate planning, `--max-turns`, wall-clock timeout, retry ceilings for the §5.4
+parse-retry loop, and cost ceilings all belong in this config — do not hardcode them.
+There is no API key field anywhere in this schema (§4). The only things that should be
+hardcoded are the plan-file schema itself and the stream-json event contract (§6), and
+the latter only via the contract test.
 
 `orkestra.json` is committed in the target repo. `.orkestra/` (run logs, run state) is
 gitignored in the target repo.
 
 ## 4. Secrets
 
-`ANTHROPIC_API_KEY` comes from the environment only, full stop. Never read or write it to
-`appsettings.json` or any file inside a repo. For local dev, `dotnet user-secrets` is fine
-for any Core component that calls the Messages API directly (Planner/Reconciler/Verifier
-roles). Do not repeat the JWT-key-in-appsettings pattern — treat this rule as
-non-negotiable even though the orkestra repo is private.
+There are none. All four roles authenticate via the machine's interactive `claude` login
+(subscription auth) — no `ANTHROPIC_API_KEY`, and no other credential, is read from or
+written to any file in either repo. A logged-out machine fails loudly via the CLI's own
+`authentication_failed` event; do not add a pre-flight credential check or a config-file
+secret to work around that. This closes off the JWT-key-in-appsettings failure mode by
+construction rather than by discipline.
 
 ## 5. Domain model and the plan-file schema
 
@@ -187,30 +200,61 @@ target repo. The vault holds plans, decisions, and verification results only. Do
 transcripts leak into the vault; that turns it into a log dump instead of durable
 knowledge.
 
-### 5.4 Forced structured output for agent roles
+### 5.4 Structured output for agent roles (vault file, not forced tool use)
 
-Wherever an agent role (Planner scoring candidates, Reconciler judging drift, Verifier
-producing a checklist result) must emit structured data, do not parse prose. Use the
-Messages API's forced tool use: define a single tool whose input schema *is* the target C#
-record, set `tool_choice` to require it, and deserialize the tool call's input directly.
-This is the reliable pattern — do not write a regex-over-paragraphs parser anywhere in
-this codebase.
+Every agent role (Planner, Reconciler, Verifier) is a `claude -p` invocation, not a
+Messages API call, so there is no `tool_choice` to force schema conformance. Structured
+output is instead a **file contract**: each role's prompt instructs the model to write its
+result as a file into the vault in a fixed, documented schema, and nothing else outside
+that file. The stream-json transcript is captured as evidence exactly as it is for the
+Implementer (§6) but is never parsed for the result — only the vault file is, and only
+after the process exits.
 
-## 6. `ClaudeCodeExecutor` — the Implementer wrapper
+- **Planner** writes a plan file: YAML frontmatter per §5.1, plus free-form prose body.
+- **Reconciler** writes a small fixed YAML/JSON verdict block (implements-plan: yes/no/
+  partial, missing items, extra items) into the vault, adjacent to the plan per the vault
+  I/O conventions already used for verification records.
+- **Verifier** writes a small fixed YAML/JSON block (per-criterion pass/fail plus notes)
+  into the verification record.
+
+Each schema gets its own C# parser/validator, held to the same strict, fail-loud
+discipline as the plan-frontmatter parser (§5.1) — throw on schema violations, never
+warn-and-continue.
+
+**On parse or validation failure, do not fail the checkpoint hard.** Feed the parse error
+back into a retry prompt for that same role, reusing the Reflexion-style retry pattern
+already specified for Implementer verification failures (§8): "your last output did not
+parse — here is the exact error — try again, writing only the file in the documented
+schema, nothing else." Cap retries (configurable, same ceiling concept as `--max-turns`)
+and, if exhausted, surface a clear, specific error to the human rather than silently
+accepting a malformed file or guessing at its content.
+
+## 6. `ClaudeCodeExecutor` — the invocation wrapper for all four roles
+
+All four roles (Planner, Implementer, Reconciler, Verifier) are scoped `claude -p`
+invocations through this same process wrapper, differing only in prompt, tool allowlist,
+and expected output file — one process spawn, one parsed output file, one retry policy.
+What follows describes the mechanism in full through the Implementer's use of it,
+including the checkpoint/branch/git specifics (§7) that are unique to the Implementer;
+Planner, Reconciler, and Verifier share the spawn/stream/log/retry mechanics below but
+write a vault file per §5.4 instead of code, and carry none of the git/checkpoint
+mechanics.
 
 This is a process wrapper, not a reasoning loop. Responsibilities:
 
 - Shell out to the `claude` CLI with `-p`/`--print` for non-interactive execution.
-- Always pass `--bare` so only explicitly-passed flags take effect — no ambient
+- Always pass `--safe-mode` so only explicitly-passed flags take effect — no ambient
   hooks/skills/plugins/MCP/memory/CLAUDE.md discovery. Orkestra supplies all context itself
   via the assembled checkpoint prompt; ambient config is noise and breaks reproducibility
-  across machines.
+  across machines. (Not `--bare`: bare mode never reads the OAuth/keychain state that
+  subscription login depends on, so it cannot authenticate any of the four roles now that
+  none of them use an API key — see §1/§4.)
 - Always pass `--output-format stream-json`. Read stdout **line-by-line**, parse each
   NDJSON event with `System.Text.Json`, and append every event to the run log as it
   arrives (don't buffer and parse at the end — the point is a durable, resumable,
   inspectable transcript).
 - **Derive the event contract empirically, do not trust this document for it.** Before
-  writing the parser, run one trivial invocation (e.g. `claude --bare -p "read this file
+  writing the parser, run one trivial invocation (e.g. `claude --safe-mode -p "read this file
   and summarize it" --allowedTools "Read" --output-format stream-json`) and capture the
   transcript. Expect top-level event types along the lines of `system` (init, carries
   `session_id`), `assistant` (whose content blocks may include `tool_use`), `user` (tool
@@ -229,7 +273,9 @@ This is a process wrapper, not a reasoning loop. Responsibilities:
 - One `claude -p` invocation per checkpoint. Do not build an interactive/looping wrapper
   that spans multiple checkpoints — checkpoint granularity is a hard architectural
   boundary, not a convenience.
-- Authentication: `ANTHROPIC_API_KEY` must be present in the child process environment.
+- Authentication: the machine's interactive `claude` login (subscription) must be valid
+  for the child process; there is no `ANTHROPIC_API_KEY` fallback or pre-flight check —
+  a logged-out machine fails loudly via the observed `authentication_failed` event.
 - Write the integration test (trait-gated, §1) asserting the observed stream-json event
   shapes. Pin the Claude Code version you develop against; this test's job is to fail
   loudly on a CLI breaking change rather than letting the parser silently misparse.
@@ -287,7 +333,8 @@ an explicit, logged choice.
 
 ### Roles to implement
 
-- **Planner** — produces the plan file. Supports two strategies behind an
+- **Planner** — a `ClaudeCodeExecutor` invocation (§6) scoped to write-into-the-vault
+  only, producing the plan file per §5.4. Supports two strategies behind an
   `IPlanningStrategy` interface:
   - `SingleCandidatePlanningStrategy` — one generation call, used for routine work (e.g. a
     new CRUD endpoint following an existing pattern).
@@ -296,32 +343,34 @@ an explicit, logged choice.
     including the plan-file schema itself, a cross-cutting concern, or is expensive to
     reverse). Generates N genuinely distinct candidates (prefer N parallel calls with
     varied framing over one call asked to produce N variants — this yields more diverse
-    candidates), scores them against project-defined axes via a critic call using forced
-    tool use, and optionally runs a synthesis call.
+    candidates), scores them against project-defined axes via a critic call whose verdict
+    is written as a structured vault file per §5.4, and optionally runs a synthesis call.
 
   Whether a given decision gets single- or multi-candidate treatment is a flag the Planner
   surfaces to the human to decide — do not have the Planner decide this autonomously; how
   much deliberation to spend is exactly the kind of meta-decision that should route to a
   checkpoint.
 
-- **Implementer** — not a custom role; this *is* `ClaudeCodeExecutor` (§6), driven by the
-  assembled checkpoint prompt (plan-file section + acceptance criteria for that checkpoint
-  only, nothing else).
+- **Implementer** — a `ClaudeCodeExecutor` invocation (§6) with the full per-checkpoint
+  tool allowlist (§7), driven by the assembled checkpoint prompt (plan-file section +
+  acceptance criteria for that checkpoint only, nothing else).
 
-- **Reconciler** — for the MVP, keep this deliberately thin: `git diff` output plus the
-  relevant plan-file section plus one prompt asking "does this diff implement what the plan
-  says, and what's missing or extra," returning a typed verdict via forced tool use. Do
-  not build a static-analysis drift-detection engine — that's a later-version idea, not
-  MVP scope.
+- **Reconciler** — a `ClaudeCodeExecutor` invocation scoped to write-into-the-vault only.
+  For the MVP, keep this deliberately thin: `git diff` output plus the relevant plan-file
+  section plus one prompt asking "does this diff implement what the plan says, and what's
+  missing or extra," writing a typed verdict as a structured vault file per §5.4. Do not
+  build a static-analysis drift-detection engine — that's a later-version idea, not MVP
+  scope.
 
 - **Verifier** — two layers, in order, and do not conflate them:
   1. **Deterministic gates first:** orkestra runs the configured build and test commands
      as plain process calls and records pass/fail and output. No LLM is involved in
      establishing whether the build compiles or the tests pass — never ask a model for a
      fact the machine can state.
-  2. **Semantic verification second, only if the gates pass:** an LLM call over the diff,
-     the deterministic-gate output, and the checkpoint's acceptance criteria, producing a
-     typed per-criterion checklist result via forced tool use (never parsed prose).
+  2. **Semantic verification second, only if the gates pass:** a `ClaudeCodeExecutor`
+     invocation scoped to write-into-the-vault only, over the diff, the deterministic-gate
+     output, and the checkpoint's acceptance criteria, writing a typed per-criterion
+     checklist result as a structured vault file per §5.4 (never parsed prose).
 
   When verification fails at either layer, write the structured findings into the vault
   such that they become part of the *next* Implementer invocation's prompt — this is a
@@ -360,8 +409,9 @@ solid, since everything downstream depends on it. **Steps 1–3 are this session
 6. `IPlanningStrategy` with `SingleCandidatePlanningStrategy` first; defer
    `MultiCandidatePlanningStrategy` until the single-candidate path and the Implementer
    loop are proven end-to-end on a trivial checkpoint in RecipeApp.
-7. Reconciler and Verifier roles (deterministic gates + semantic layer), forced-tool-use
-   output types, the Verifier-failure → next-prompt feedback loop.
+7. Reconciler and Verifier roles (deterministic gates + semantic layer), vault-file output
+   schemas and their parsers/validators (§5.4), the Verifier-failure → next-prompt feedback
+   loop.
 8. End-to-end validation: one full trivial checkpoint against RecipeApp, human review of
    the diff, merge.
 
