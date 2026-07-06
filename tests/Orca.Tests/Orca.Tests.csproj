@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <None Update="Fixtures\**\*.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\**\*.ndjson" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

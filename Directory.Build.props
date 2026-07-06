@@ -6,6 +6,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- dotnet test does not auto-discover a repo-root .runsettings (verified on SDK
+         10.0.301/vstest 18); this wires the default filter that excludes the billed
+         live-CLI contract test. An explicit CLI settings flag still overrides it. -->
+    <RunSettingsFilePath>$(MSBuildThisFileDirectory).runsettings</RunSettingsFilePath>
   </PropertyGroup>
 
 </Project>

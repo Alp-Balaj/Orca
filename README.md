@@ -2,7 +2,7 @@
 
 Orca orchestrates Claude Code as a disciplined, checkpoint-gated software-development agent.
 An Obsidian vault is the stateless handoff layer: the Planner writes plan files, every
-Implementer invocation is a single scoped `claude -p --bare` process whose prompt is
+agent invocation is a single scoped `claude -p --safe-mode` process whose prompt is
 assembled fresh from the vault, and Reconciler/Verifier results are written back to the
 vault where they gate — and feed — the next attempt. A human reviews and approves at every
 checkpoint; nothing runs unattended across checkpoint boundaries.
@@ -13,32 +13,45 @@ Orca is a workflow, not an autonomous agent. The full spec is `docs/kickoff-v2.m
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| Claude Code CLI | **2.1.201** | the stream-json event contract is derived empirically; a trait-gated integration test (build-order step 4) fails loudly on CLI breaking changes |
+| Claude Code CLI | **2.1.201** | the stream-json event contract is derived empirically from committed transcript fixtures; a trait-gated contract test fails loudly on CLI breaking changes |
 | .NET SDK | 10.0.301 | `net10.0`, nullable + implicit usings, warnings as errors, central package management |
 
 ## Layout
 
-    src/Orca.Core/     domain types, vault I/O, executor wrapper, planning strategies, Anthropic client
+    src/Orca.Core/     domain types, vault I/O, executor wrapper, planning strategies
     src/Orca.Cli/      thin Spectre.Console shell — command wiring only; packs as dotnet tool `orca`
-    tests/Orca.Tests/  xUnit; the default `dotnet test` run excludes [Trait("Category","Integration")]
+    tests/Orca.Tests/  xUnit; the default `dotnet test` run excludes the billed contract test
     prompts/           one versioned prompt file per agent role (SHA-256 recorded per run)
-    docs/              the as-received kickoff spec
+    docs/              the kickoff spec, amended with the owner's auth decisions
 
 ## Build & test
 
     dotnet build
     dotnet test
 
-Integration tests (real `claude` binary + `ANTHROPIC_API_KEY`) arrive in step 4 and run only
-deliberately: `dotnet test --filter Category=Integration`.
+The default run excludes the live-CLI contract test via the repo-root `.runsettings`
+(wired through `RunSettingsFilePath` — `dotnet test` does not auto-discover it). Run the
+contract test deliberately, on a logged-in machine (~$0.20 of subscription quota):
 
-## Secrets
+    dotnet test --settings tests/integration.runsettings
 
-`ANTHROPIC_API_KEY` comes from the environment only. It is never read from, or written to,
-any file in any repository. Non-negotiable.
+Process-mechanics tests (timeout kill, resolver) run by default and skip visibly when no
+`claude` binary is on PATH.
+
+## Auth & secrets
+
+There are none to manage. All four roles (Planner, Implementer, Reconciler, Verifier) run
+through `ClaudeCodeExecutor` and authenticate via the machine's interactive `claude`
+subscription login. No `ANTHROPIC_API_KEY`, no credential in any file in any repository —
+by owner decision (2026-07-06), after the step-4 capture proved `--bare` cannot
+authenticate from a subscription (hence `--safe-mode`). A logged-out machine fails loudly
+via the CLI's own `authentication_failed` event; there is deliberately no pre-flight
+credential check.
 
 ## Status
 
-Build order (`docs/kickoff-v2.md` §9): **steps 1–3 complete** — scaffold, domain model +
-strict frontmatter parsers, vault reader/writer. Next session: step 4, `ClaudeCodeExecutor`
-(empirical transcript capture first).
+Build order (`docs/kickoff-v2.md` §9): **steps 1–4 complete** — scaffold, domain model +
+strict frontmatter parsers, vault reader/writer, and `ClaudeCodeExecutor` on the
+empirically captured 2.1.201 stream contract (fixtures in
+`tests/Orca.Tests/Fixtures/Transcripts/`). Next session: step 5, `orca.json` config +
+git mechanics + first CLI commands.

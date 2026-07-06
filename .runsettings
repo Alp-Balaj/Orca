@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Default test runs exclude the billed live-CLI contract test. Run it deliberately
+     with the settings file at tests/integration.runsettings (a filter flag on the CLI
+     would be ANDed with this filter into a contradiction; use the settings file). -->
+<RunSettings>
+  <RunConfiguration>
+    <TestCaseFilter>Category!=Integration</TestCaseFilter>
+  </RunConfiguration>
+</RunSettings>

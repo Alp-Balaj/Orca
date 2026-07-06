@@ -23,6 +23,12 @@ public sealed record RunState
     public required IReadOnlyDictionary<string, string> PromptHashes { get; init; }
 
     public required decimal AccumulatedCostUsd { get; init; }
+
+    /// <summary>Token usage reported by the most recent executor invocation's
+    /// <c>result</c> event; null until the first invocation completes. Added by
+    /// checkpoint 04 (criterion: "usage … extracted into run state").</summary>
+    public required TokenUsage? LastUsage { get; init; }
+
     public required DateTimeOffset StartedAt { get; init; }
     public required DateTimeOffset UpdatedAt { get; init; }
 }

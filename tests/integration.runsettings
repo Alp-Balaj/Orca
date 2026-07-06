@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The deliberate integration run: ONLY the live-CLI contract test. Billed against
+     subscription quota and needs a machine logged in to claude:
+     dotnet test with this file passed via the settings option. -->
+<RunSettings>
+  <RunConfiguration>
+    <TestCaseFilter>Category=Integration</TestCaseFilter>
+  </RunConfiguration>
+</RunSettings>

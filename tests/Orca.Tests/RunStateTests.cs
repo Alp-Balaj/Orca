@@ -21,6 +21,7 @@ public class RunStateTests
             ["verifier"] = "9f04...7e",
         },
         AccumulatedCostUsd = 1.37m,
+        LastUsage = null,
         StartedAt = new DateTimeOffset(2026, 7, 6, 14, 0, 0, TimeSpan.Zero),
         UpdatedAt = new DateTimeOffset(2026, 7, 6, 16, 5, 0, TimeSpan.Zero),
     };
@@ -39,6 +40,49 @@ public class RunStateTests
         Assert.Equal("orca/recipe-tagging/01-tag-entity", restored.Branch);
         Assert.Equal(1.37m, restored.AccumulatedCostUsd);
         Assert.Equal("3b8a...c1", restored.PromptHashes["implementer"]);
+    }
+
+    [Fact]
+    public void Round_trips_the_last_usage_block()
+    {
+        var state = Sample() with
+        {
+            LastUsage = new TokenUsage
+            {
+                InputTokens = 2716,
+                OutputTokens = 206,
+                CacheCreationInputTokens = 5289,
+                CacheReadInputTokens = 16913,
+            },
+        };
+
+        var json = RunStateSerializer.ToJson(state);
+
+        Assert.Contains("\"lastUsage\"", json);
+        Assert.Contains("\"cacheReadInputTokens\"", json);
+
+        var restored = RunStateSerializer.FromJson(json);
+
+        Assert.Equal(state.LastUsage, restored.LastUsage);
+        Assert.Equal(json, RunStateSerializer.ToJson(restored));
+    }
+
+    [Fact]
+    public void Rejects_unknown_members_inside_last_usage()
+    {
+        var json = RunStateSerializer.ToJson(Sample() with
+        {
+            LastUsage = new TokenUsage
+            {
+                InputTokens = 1,
+                OutputTokens = 1,
+                CacheCreationInputTokens = 0,
+                CacheReadInputTokens = 0,
+            },
+        });
+        var withExtra = json.Replace("\"inputTokens\": 1", "\"inputTokens\": 1, \"surprise\": true");
+
+        Assert.ThrowsAny<JsonException>(() => RunStateSerializer.FromJson(withExtra));
     }
 
     [Fact]
