@@ -48,10 +48,31 @@ Process-mechanics tests (timeout kill, resolver) run by default and skip visibly
 
 `checkpoint-run` runs exactly one checkpoint — clean-tree check, branch
 `orca/{plan-id}/{checkpoint-id}` off the plan's base branch, one scoped `claude -p`
-invocation, then an Approve / Reject / Defer prompt. Approve commits with a structured
-message; Reject *offers* a hard reset (never automatic); Defer leaves the decision, and
-the next `checkpoint-run` resumes it instead of paying for a new invocation. `--dry-run`
-prints the branch, assembled prompt, and exact argv without mutating anything.
+invocation — then verifies it and stops at an Approve / Reject / Defer prompt. Approve
+commits with a structured message; Reject *offers* a hard reset (never automatic); Defer
+leaves the decision, and the next `checkpoint-run` resumes it instead of paying for a new
+invocation. `--dry-run` prints the branch, assembled prompt, and exact argv without
+mutating anything.
+
+**Verification runs automatically after the Implementer** (spec §8, built in step 7),
+in a fixed order: deterministic gates first — `commands.build` then `commands.test` as
+plain process calls, both always run, output captured under `.orca/runs/` — and if either
+fails, the verification record is written (`verdict: fail`, `semantic: null`) and **no
+LLM runs at all**. With green gates, the **Reconciler** judges the diff against the
+checkpoint's plan section (one typed verdict: `implements_plan: full|partial|none` plus
+`missing`/`extra` lists) and the **Verifier** judges each acceptance criterion byte-exact
+(`pass|fail|unclear`, note required on every non-pass; `unclear` fails the checkpoint).
+Both are vault-write-scoped `claude -p` invocations under the §5.4 file contract: they
+write into `<plan-dir>/.staging/`, Orca parses fail-loud, retries with the exact error up
+to `maxParseRetries`, then re-serializes the validated content into the canonical
+append-only records — `reconciliation/<checkpoint>.attempt-<n>.md` and
+`verification/<checkpoint>.attempt-<n>.md` (gates + semantic + a **derived** verdict; the
+model never transcribes a machine fact). Failed findings ride the next attempt's
+Implementer prompt as a "Previous attempt findings" section — the Reflexion loop, with
+the vault as the memory. `maxCheckpointAttempts` caps those retries; the ceiling refuses
+at prepare time, before anything is spent. An interrupted pipeline (rate limit, auth
+expiry) resumes on the next `checkpoint-run`: sub-steps whose records already exist are
+never re-paid.
 
 `plan-generate` runs the Planner: one `claude -p` invocation, working directory = the
 vault, scoped by `roles.planner`, that must write a schema-valid **draft** plan file
@@ -97,6 +118,12 @@ invocation time, not config-load time — the run summary surfaces the CLI's own
 
 `maxParseRetries` (the §5.4 structured-output retry ceiling) is required the first time
 `plan-generate` runs; roles only need to be configured when they are actually invoked.
+Since step 7, `checkpoint-run` invokes the whole pipeline, so it requires
+`maxParseRetries`, `maxCheckpointAttempts` (the verification-retry ceiling), and complete
+`roles.reconciler`/`roles.verifier` blocks — validated at prepare time, before the
+Implementer spends anything. `gateTimeoutSeconds` (optional, top-level) is the
+runaway-build backstop: absent means unbounded (Ctrl-C is the interactive fallback); when
+set, a gate crossing it has its process tree killed and records `fail`.
 
 ## Auth & secrets
 
@@ -110,10 +137,12 @@ credential check.
 
 ## Status
 
-Build order (`docs/kickoff-v2.md` §9): **steps 1–6 complete** — scaffold, domain model +
+Build order (`docs/kickoff-v2.md` §9): **steps 1–7 complete** — scaffold, domain model +
 strict frontmatter parsers, vault reader/writer, `ClaudeCodeExecutor` on the empirically
 captured 2.1.201 stream contract (fixtures in `tests/Orca.Tests/Fixtures/Transcripts/`),
-config loading + git mechanics + the `plan-init`/`checkpoint-run`/`status` commands, and
+config loading + git mechanics + the `plan-init`/`checkpoint-run`/`status` commands,
 `IPlanningStrategy` with the single-candidate Planner (`plan-generate`) plus the
-stop-reason contract for shared-subscription failure modes. Next session: step 7,
-Reconciler and the two-layer Verifier.
+stop-reason contract for shared-subscription failure modes, and the step-7 verification
+loop: deterministic gates, the Reconciler, the semantic Verifier, their §5.4 vault-file
+contracts with capped Reflexion retries, and the failed-verification → next-prompt
+feedback loop. Next session: step 8, one trivial checkpoint end-to-end against RecipeApp.

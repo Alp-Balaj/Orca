@@ -83,6 +83,16 @@ internal sealed class MappingReader
 
     internal IReadOnlyList<string> RequireStringList(string key)
     {
+        var items = RequireStringListAllowEmpty(key);
+        if (items.Count == 0)
+            throw Violation($"'{key}' must be a non-empty list");
+        return items;
+    }
+
+    /// <summary>Like <see cref="RequireStringList"/> but an empty list (<c>[]</c>) is
+    /// legal — e.g. a reconciliation record's <c>missing</c>/<c>extra</c> items.</summary>
+    internal IReadOnlyList<string> RequireStringListAllowEmpty(string key)
+    {
         var items = new List<string>();
         foreach (var node in RequireSequence(key))
         {
@@ -91,8 +101,6 @@ internal sealed class MappingReader
             items.Add(scalar.Value!);
         }
 
-        if (items.Count == 0)
-            throw Violation($"'{key}' must be a non-empty list");
         return items;
     }
 

@@ -80,6 +80,50 @@ public sealed class RunLogLayout
 
         return Path.Combine(RunsRoot, planId, $"planning.attempt-{attempt}.settings.json");
     }
+
+    /// <summary>Combined stdout+stderr capture of one deterministic gate command —
+    /// <c>&lt;checkpoint-id&gt;.attempt-&lt;n&gt;.build.txt</c> / <c>….tests.txt</c>.</summary>
+    public string GateOutputFile(string planId, string checkpointId, int attempt, string gate)
+    {
+        if (gate is not ("build" or "tests"))
+            throw new ArgumentException($"gate must be 'build' or 'tests', got '{gate}'", nameof(gate));
+        return Path.Combine(RunsRoot, planId, $"{Stem(planId, checkpointId, attempt)}.{gate}.txt");
+    }
+
+    /// <summary>Log paths for one Reconciler/Verifier invocation. <paramref name="invocation"/>
+    /// numbers the §5.4 parse retries within a checkpoint attempt (1-based) — each retry is
+    /// a fresh process with its own transcript.</summary>
+    public RunLogPaths RoleAttemptPaths(string planId, string checkpointId, int attempt, string role, int invocation)
+    {
+        var stem = RoleStem(planId, checkpointId, attempt, role, invocation);
+        return new RunLogPaths
+        {
+            EventLog = Path.Combine(RunsRoot, planId, stem + ".ndjson"),
+            Stderr = Path.Combine(RunsRoot, planId, stem + ".stderr.txt"),
+        };
+    }
+
+    /// <summary>The <c>--settings</c> evidence file for one Reconciler/Verifier invocation.</summary>
+    public string RoleSettingsFile(string planId, string checkpointId, int attempt, string role, int invocation) =>
+        Path.Combine(RunsRoot, planId, RoleStem(planId, checkpointId, attempt, role, invocation) + ".settings.json");
+
+    private static string RoleStem(string planId, string checkpointId, int attempt, string role, int invocation)
+    {
+        if (role is not ("reconciler" or "verifier"))
+            throw new ArgumentException($"role must be 'reconciler' or 'verifier', got '{role}'", nameof(role));
+        if (invocation < 1)
+            throw new ArgumentOutOfRangeException(nameof(invocation), invocation, "invocation must be >= 1");
+        return $"{Stem(planId, checkpointId, attempt)}.{role}-{invocation}";
+    }
+
+    private static string Stem(string planId, string checkpointId, int attempt)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        VaultLayout.ValidateCheckpointId(checkpointId);
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+        return $"{checkpointId}.attempt-{attempt}";
+    }
 }
 
 /// <summary>The two files one invocation writes: the NDJSON event log and the raw

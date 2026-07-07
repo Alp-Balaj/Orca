@@ -265,6 +265,7 @@ public sealed class ConfigLoaderTests : IDisposable
     [Theory]
     [InlineData(""" "maxParseRetries": -1 """)]
     [InlineData(""" "maxCheckpointAttempts": 0 """)]
+    [InlineData(""" "gateTimeoutSeconds": 0 """)]
     [InlineData(""" "planning": { "candidates": 1 } """)]
     [InlineData(""" "deniedTools": ["Bash(rm *)", " "] """)]
     [InlineData(""" "roles": { "verifier": { "maxTurns": 0 } } """)]
@@ -282,5 +283,41 @@ public sealed class ConfigLoaderTests : IDisposable
             """;
 
         Assert.Throws<ConfigException>(() => ConfigLoader.Load(WriteRepoConfig(json), GlobalWithVault()));
+    }
+
+    [Fact]
+    public void Gate_timeout_merges_repo_over_global_and_maps_to_a_timespan()
+    {
+        var global = WriteGlobalConfig($$"""
+            {
+              "schemaVersion": 1,
+              "gateTimeoutSeconds": 600,
+              "vaults": { "brian-the-brain": {{System.Text.Json.JsonSerializer.Serialize(Path.Combine(_root, "vault"))}} }
+            }
+            """);
+        var repo = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] },
+              "gateTimeoutSeconds": 900
+            }
+            """);
+
+        Assert.Equal(TimeSpan.FromSeconds(900), ConfigLoader.Load(repo, global).GateTimeout);
+    }
+
+    [Fact]
+    public void An_absent_gate_timeout_means_unbounded()
+    {
+        var repo = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] }
+            }
+            """);
+
+        Assert.Null(ConfigLoader.Load(repo, GlobalWithVault()).GateTimeout);
     }
 }

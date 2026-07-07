@@ -12,7 +12,7 @@ public static class PlannerPrompt
 {
     private const string ResourceName = "Orca.Core.Prompts.planner.md";
 
-    public static string RoleText { get; } = ReadEmbedded();
+    public static string RoleText { get; } = RolePromptResource.Read(ResourceName);
 
     /// <summary>Hash of the role prompt file itself — the attribution contract ("did the
     /// Planner get stricter, or did prompt v3 land").</summary>
@@ -59,14 +59,5 @@ public static class PlannerPrompt
         }
 
         return sb.ToString();
-    }
-
-    private static string ReadEmbedded()
-    {
-        using var stream = typeof(PlannerPrompt).Assembly.GetManifestResourceStream(ResourceName)
-            ?? throw new InvalidOperationException(
-                $"embedded prompt resource '{ResourceName}' is missing — the build no longer embeds prompts/planner.md");
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
     }
 }

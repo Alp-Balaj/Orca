@@ -1,1 +1,3 @@
-* text=auto
+# Sources are LF everywhere — raw string literals, embedded prompts, and their
+# SHA-256 hashes must be byte-identical on the Windows and Arch machines.
+* text=auto eol=lf

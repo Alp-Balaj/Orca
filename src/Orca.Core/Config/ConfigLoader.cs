@@ -51,6 +51,7 @@ public static class ConfigLoader
         SchemaVersion = 1,
         Vault = MergeVault(global.Vault, repo.Vault),
         Commands = MergeCommands(global.Commands, repo.Commands),
+        GateTimeoutSeconds = repo.GateTimeoutSeconds ?? global.GateTimeoutSeconds,
         MaxParseRetries = repo.MaxParseRetries ?? global.MaxParseRetries,
         MaxCheckpointAttempts = repo.MaxCheckpointAttempts ?? global.MaxCheckpointAttempts,
         Planning = new PlanningSection
@@ -130,6 +131,8 @@ public static class ConfigLoader
         var build = RequireCommand(merged.Commands?.Build, "commands.build", repoPath);
         var test = RequireCommand(merged.Commands?.Test, "commands.test", repoPath);
 
+        if (merged.GateTimeoutSeconds is < 1)
+            throw new ConfigException($"{repoPath}: gateTimeoutSeconds must be >= 1, got {merged.GateTimeoutSeconds}");
         if (merged.MaxParseRetries is < 0)
             throw new ConfigException($"{repoPath}: maxParseRetries must be >= 0, got {merged.MaxParseRetries}");
         if (merged.MaxCheckpointAttempts is < 1)
@@ -154,6 +157,9 @@ public static class ConfigLoader
             PlansDir = plansDir,
             BuildCommand = build,
             TestCommand = test,
+            GateTimeout = merged.GateTimeoutSeconds is { } gateSeconds
+                ? TimeSpan.FromSeconds(gateSeconds)
+                : null,
             MaxParseRetries = merged.MaxParseRetries,
             MaxCheckpointAttempts = merged.MaxCheckpointAttempts,
             PlanningCandidates = merged.Planning?.Candidates,

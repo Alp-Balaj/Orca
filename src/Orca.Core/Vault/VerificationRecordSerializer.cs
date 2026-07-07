@@ -53,11 +53,5 @@ public static class VerificationRecordSerializer
         return timestamp.UtcDateTime.ToString(format, CultureInfo.InvariantCulture);
     }
 
-    private static string Quote(string value) =>
-        "\"" + value
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\r", "\\r")
-            .Replace("\n", "\\n")
-            .Replace("\t", "\\t") + "\"";
+    private static string Quote(string value) => YamlEmit.Quote(value);
 }

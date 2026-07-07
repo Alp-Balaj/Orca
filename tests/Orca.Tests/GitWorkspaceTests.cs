@@ -154,4 +154,27 @@ public sealed class GitWorkspaceTests : IDisposable
 
         Assert.Throws<GitException>(() => workspace.SwitchTo("main"));
     }
+
+    [Fact]
+    public void FullDiff_covers_tracked_changes_and_untracked_content()
+    {
+        var workspace = Workspace();
+        _repo.WriteFile(".gitignore", ".orca/\n");
+        _repo.Git("add", "-A");
+        _repo.Git("commit", "-m", "ignore .orca");
+
+        _repo.WriteFile("README.md", "seed\nplus a change\n");
+        _repo.WriteFile("nested/new.txt", "brand new content\n");
+        File.WriteAllBytes(Path.Combine(_repo.Root, "blob.bin"), [0x00, 0x01, 0x02]);
+        _repo.WriteFile(".orca/runs/p/log.ndjson", "{}\n"); // ignored — must not appear
+
+        var diff = workspace.FullDiff();
+
+        Assert.Contains("+plus a change", diff);
+        Assert.Contains("## New file (untracked): nested/new.txt", diff);
+        Assert.Contains("brand new content", diff);
+        Assert.Contains("## New file (untracked): blob.bin", diff);
+        Assert.Contains("(binary file, 3 bytes — content omitted)", diff);
+        Assert.DoesNotContain(".orca/runs", diff);
+    }
 }

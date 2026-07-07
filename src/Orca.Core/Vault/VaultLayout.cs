@@ -52,6 +52,40 @@ public sealed class VaultLayout
             $"{ValidateCheckpointId(checkpointId)}.attempt-{attempt}.md");
     }
 
+    public string ReconciliationDirectory(string planId) =>
+        Path.Combine(PlanDirectory(planId), "reconciliation");
+
+    public string ReconciliationFile(string planId, string checkpointId, int attempt)
+    {
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+        return Path.Combine(
+            ReconciliationDirectory(planId),
+            $"{ValidateCheckpointId(checkpointId)}.attempt-{attempt}.md");
+    }
+
+    /// <summary>Where the Reconciler and Verifier write their raw §5.4 output before Orca
+    /// validates and re-serializes it into a canonical record. A dot-directory so Obsidian
+    /// hides it; record directories only ever hold Orca-written files, so a malformed
+    /// leftover here can never poison a later read.</summary>
+    public string StagingDirectory(string planId) =>
+        Path.Combine(PlanDirectory(planId), ".staging");
+
+    public string StagingReconciliationFile(string planId, string checkpointId, int attempt) =>
+        StagingFile(planId, checkpointId, attempt, "reconciliation");
+
+    public string StagingSemanticFile(string planId, string checkpointId, int attempt) =>
+        StagingFile(planId, checkpointId, attempt, "semantic");
+
+    private string StagingFile(string planId, string checkpointId, int attempt, string kind)
+    {
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+        return Path.Combine(
+            StagingDirectory(planId),
+            $"{ValidateCheckpointId(checkpointId)}.attempt-{attempt}.{kind}.md");
+    }
+
     internal static string ValidatePlanId(string planId) =>
         SchemaRegexes.PlanId().IsMatch(planId)
             ? planId

@@ -79,7 +79,11 @@ public sealed class CheckpointRunnerTests : IDisposable
         }
     }
 
-    private OrcaConfig Config(string[]? deniedTools = null) => new()
+    private OrcaConfig Config(
+        string[]? deniedTools = null,
+        int? maxParseRetries = 1,
+        int? maxCheckpointAttempts = 3,
+        bool verificationRoles = true) => new()
     {
         RepoConfigPath = Path.Combine(_repo.Root, "orca.json"),
         GlobalConfigPath = Path.Combine(_repo.Root, "global.json"),
@@ -88,8 +92,9 @@ public sealed class CheckpointRunnerTests : IDisposable
         PlansDir = "Plans",
         BuildCommand = ["dotnet", "build"],
         TestCommand = ["dotnet", "test"],
-        MaxParseRetries = null,
-        MaxCheckpointAttempts = null,
+        GateTimeout = null,
+        MaxParseRetries = maxParseRetries,
+        MaxCheckpointAttempts = maxCheckpointAttempts,
         PlanningCandidates = null,
         DeniedTools = deniedTools ?? ["Bash(git push*)"],
         RoleSections = new RolesSection
@@ -100,11 +105,23 @@ public sealed class CheckpointRunnerTests : IDisposable
                 MaxTurns = 10,
                 TimeoutSeconds = 300,
             },
+            Reconciler = verificationRoles
+                ? new RoleSection { AllowedTools = ["Read", "Write"], MaxTurns = 10, TimeoutSeconds = 300 }
+                : null,
+            Verifier = verificationRoles
+                ? new RoleSection { AllowedTools = ["Read", "Write"], MaxTurns = 10, TimeoutSeconds = 300 }
+                : null,
         },
     };
 
-    private CheckpointRunner Runner(FakeExecutor executor, string[]? deniedTools = null) =>
-        new(Config(deniedTools), GitWorkspace.Discover(_repo.Root), executor);
+    private CheckpointRunner Runner(
+        FakeExecutor executor,
+        string[]? deniedTools = null,
+        int? maxParseRetries = 1,
+        int? maxCheckpointAttempts = 3,
+        bool verificationRoles = true) =>
+        new(Config(deniedTools, maxParseRetries, maxCheckpointAttempts, verificationRoles),
+            GitWorkspace.Discover(_repo.Root), executor);
 
     [Fact]
     public void Prepare_computes_everything_without_mutating_anything()
@@ -328,6 +345,87 @@ public sealed class CheckpointRunnerTests : IDisposable
 
         var e = Assert.Throws<CheckpointRunException>(() => Runner(new FakeExecutor(_repo)).Prepare(null, null));
         Assert.Contains("no pending checkpoints", e.Message);
+    }
+
+    [Fact]
+    public void Prepare_appends_the_latest_findings_to_the_prompt()
+    {
+        // Prior findings live in the vault (spec §8: the Reflexion memory), possibly
+        // from different attempts — a gate-failed attempt has no reconciliation.
+        var writer = new Orca.Core.Vault.VaultWriter(new Orca.Core.Vault.VaultLayout(_vault, "Plans"));
+        writer.WriteVerificationRecord(new VerificationRecord(
+            1, "recipe-tagging", 1, "01-tag-entity", 1, DateTimeOffset.Parse("2026-07-07T10:00:00Z"),
+            new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+            [
+                new SemanticCriterionResult("Tag entity exists", SemanticVerdict.Pass, null),
+                new SemanticCriterionResult("EF mapping compiles", SemanticVerdict.Fail, "no DbSet in the diff"),
+            ],
+            VerificationVerdict.Fail,
+            "## Gates\n\n- build: pass\n- tests: pass\n"));
+        writer.WriteReconciliationRecord(new ReconciliationRecord(
+            1, "recipe-tagging", 1, "01-tag-entity", 1,
+            ReconciliationVerdict.Partial, ["the EF mapping the plan asks for"], [], "Entity only.\n"));
+
+        var preview = Runner(new FakeExecutor(_repo)).Prepare(null, "01-tag-entity");
+
+        Assert.Contains("## Previous attempt findings", preview.Prompt);
+        Assert.Contains("Verification of attempt 1 — verdict: fail", preview.Prompt);
+        Assert.Contains("[fail] EF mapping compiles — no DbSet in the diff", preview.Prompt);
+        Assert.Contains("Reconciliation of attempt 1 — implements_plan: partial", preview.Prompt);
+        Assert.Contains("the EF mapping the plan asks for", preview.Prompt);
+    }
+
+    [Fact]
+    public void A_first_attempt_prompt_carries_no_findings_section()
+    {
+        var preview = Runner(new FakeExecutor(_repo)).Prepare(null, null);
+
+        Assert.DoesNotContain("Previous attempt findings", preview.Prompt);
+    }
+
+    [Fact]
+    public void Prepare_refuses_an_attempt_beyond_the_ceiling()
+    {
+        new RunStateStore(_repo.Root).Write(new RunState
+        {
+            SchemaVersion = 1,
+            PlanId = "recipe-tagging",
+            PlanVersion = 1,
+            CheckpointIndex = 0,
+            CheckpointId = "01-tag-entity",
+            Attempt = 3,
+            Branch = "orca/recipe-tagging/01-tag-entity",
+            SessionId = null,
+            PromptHashes = new Dictionary<string, string>(),
+            AccumulatedCostUsd = 0m,
+            LastUsage = null,
+            LastStopReason = null,
+            StartedAt = DateTimeOffset.UnixEpoch,
+            UpdatedAt = DateTimeOffset.UnixEpoch,
+        });
+        _repo.Git("branch", "orca/recipe-tagging/01-tag-entity");
+
+        var e = Assert.Throws<CheckpointRunException>(() =>
+            Runner(new FakeExecutor(_repo), maxCheckpointAttempts: 3).Prepare(null, "01-tag-entity"));
+
+        Assert.Contains("maxCheckpointAttempts=3", e.Message);
+    }
+
+    [Fact]
+    public void Prepare_refuses_a_repo_not_configured_for_verification()
+    {
+        // Fail before the Implementer spends anything, naming what is missing.
+        var noRoles = Assert.Throws<ConfigException>(() =>
+            Runner(new FakeExecutor(_repo), verificationRoles: false).Prepare(null, null));
+        Assert.Contains("reconciler", noRoles.Message);
+
+        var noParseRetries = Assert.Throws<ConfigException>(() =>
+            Runner(new FakeExecutor(_repo), maxParseRetries: null).Prepare(null, null));
+        Assert.Contains("maxParseRetries", noParseRetries.Message);
+
+        var noCeiling = Assert.Throws<ConfigException>(() =>
+            Runner(new FakeExecutor(_repo), maxCheckpointAttempts: null).Prepare(null, null));
+        Assert.Contains("maxCheckpointAttempts", noCeiling.Message);
     }
 
     /// <summary>Stands in for the claude process: records the invocation, drops a file

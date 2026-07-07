@@ -63,6 +63,15 @@ internal static class SchemaEnums
             $"invalid verdict '{value}' (expected pass|fail)"),
     };
 
+    internal static ReconciliationVerdict ParseReconciliationVerdict(string value, string filePath) => value switch
+    {
+        "full" => ReconciliationVerdict.Full,
+        "partial" => ReconciliationVerdict.Partial,
+        "none" => ReconciliationVerdict.None,
+        _ => throw new VaultSchemaException(filePath,
+            $"invalid implements_plan '{value}' (expected full|partial|none)"),
+    };
+
     internal static string ToYaml(PlanStatus value) => value switch
     {
         PlanStatus.Draft => "draft",
@@ -98,4 +107,11 @@ internal static class SchemaEnums
 
     internal static string ToYaml(VerificationVerdict value) =>
         value == VerificationVerdict.Pass ? "pass" : "fail";
+
+    internal static string ToYaml(ReconciliationVerdict value) => value switch
+    {
+        ReconciliationVerdict.Full => "full",
+        ReconciliationVerdict.Partial => "partial",
+        _ => "none",
+    };
 }

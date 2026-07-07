@@ -67,6 +67,19 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
 
         var runTable = new Table().HideHeaders().Border(TableBorder.None).AddColumns("k", "v");
         runTable.AddRow("last checkpoint", $"{state.CheckpointId.EscapeMarkup()} attempt {state.Attempt} on {state.Branch.EscapeMarkup()}");
+
+        var verifications = reader.ReadVerificationRecords(planId, state.CheckpointId);
+        if (verifications.Count > 0)
+        {
+            var latest = verifications[^1];
+            var verdict = latest.Verdict == VerificationVerdict.Pass ? "[green]pass[/]" : "[red]fail[/]";
+            runTable.AddRow("verification", $"{verdict} (attempt {latest.Attempt}, gates: build {SchemaYaml(latest.Gates.Build)}, tests {SchemaYaml(latest.Gates.Tests)})");
+        }
+        else
+        {
+            runTable.AddRow("verification", "(no record yet)");
+        }
+
         runTable.AddRow("session", (state.SessionId ?? "(none recorded)").EscapeMarkup());
         runTable.AddRow("accumulated cost", $"${state.AccumulatedCostUsd}");
         if (state.LastUsage is { } usage)
@@ -75,4 +88,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         AnsiConsole.Write(new Panel(runTable).Header("run state"));
         return 0;
     }
+
+    private static string SchemaYaml(GateOutcome outcome) =>
+        outcome == GateOutcome.Pass ? "pass" : "fail";
 }

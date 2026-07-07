@@ -15,6 +15,12 @@ public sealed record ConfigDocument
     public int? SchemaVersion { get; init; }
     public VaultSection? Vault { get; init; }
     public CommandsSection? Commands { get; init; }
+
+    /// <summary>Wall-clock ceiling for one deterministic-gate command (build or tests),
+    /// the runaway-build backstop (owner-approved 2026-07-07). Null/absent = unbounded —
+    /// <c>checkpoint-run</c> is interactive and Ctrl-C remains the fallback.</summary>
+    public int? GateTimeoutSeconds { get; init; }
+
     public int? MaxParseRetries { get; init; }
     public int? MaxCheckpointAttempts { get; init; }
     public PlanningSection? Planning { get; init; }

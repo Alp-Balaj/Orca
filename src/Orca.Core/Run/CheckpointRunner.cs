@@ -84,10 +84,37 @@ public sealed class CheckpointRunner(
             && workspace.CurrentBranch() == branch
             && !workspace.IsClean();
 
+        // Since step 7 a checkpoint run includes the verification pipeline, so a repo
+        // missing its Reconciler/Verifier config or the two ceilings must refuse here —
+        // before the Implementer spends anything — not halfway through.
+        _ = config.GetRole(RoleName.Reconciler);
+        _ = config.GetRole(RoleName.Verifier);
+        _ = config.MaxParseRetries
+            ?? throw new ConfigException(
+                $"maxParseRetries is required to run checkpoints (the §5.4 parse-retry ceiling) — set it in {config.RepoConfigPath} or {config.GlobalConfigPath}");
+        var maxAttempts = config.MaxCheckpointAttempts
+            ?? throw new ConfigException(
+                $"maxCheckpointAttempts is required to run checkpoints (the spec §8 verification-retry ceiling) — set it in {config.RepoConfigPath} or {config.GlobalConfigPath}");
+        if (!pendingDecision && attempt > maxAttempts)
+            throw new CheckpointRunException(
+                $"attempt {attempt} would exceed maxCheckpointAttempts={maxAttempts} for checkpoint '{checkpoint.Id}' — " +
+                $"review the verification findings in the vault and revise the plan or its criteria, or raise the ceiling in {config.RepoConfigPath}");
+
         var childNotePath = _layout.ChildNoteFile(plan.PlanId, checkpoint.Id);
         var childNote = File.Exists(childNotePath) ? reader.ReadChildNote(plan, checkpoint.Id) : null;
 
-        var prompt = CheckpointPrompt.Assemble(plan, checkpoint, childNote);
+        // The Reflexion loop's memory: the latest findings for this checkpoint ride the
+        // next attempt's prompt, read from the vault only (spec §8). Each is the latest
+        // of its kind — a gate-failed attempt has no reconciliation record.
+        var verifications = reader.ReadVerificationRecords(plan.PlanId, checkpoint.Id);
+        var reconciliations = reader.ReadReconciliationRecords(plan.PlanId, checkpoint.Id);
+        var feedback = new AttemptFeedback
+        {
+            Verification = verifications.Count > 0 ? verifications[^1] : null,
+            Reconciliation = reconciliations.Count > 0 ? reconciliations[^1] : null,
+        };
+
+        var prompt = CheckpointPrompt.Assemble(plan, checkpoint, childNote, feedback.IsEmpty ? null : feedback);
         var role = config.GetRole(RoleName.Implementer);
         var settingsJson = config.DeniedTools.Count > 0 ? PermissionSettings.ToJson(config.DeniedTools) : null;
 

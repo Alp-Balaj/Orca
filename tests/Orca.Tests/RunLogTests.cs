@@ -56,6 +56,41 @@ public class RunLogLayoutTests
         Assert.ThrowsAny<ArgumentException>(() =>
             new RunLogLayout("/repo").PlanningSettingsFile("../escape", 1));
     }
+
+    [Fact]
+    public void Gate_output_files_sit_beside_the_attempt_logs()
+    {
+        var layout = new RunLogLayout("/repo");
+        var expectedDir = Path.Combine(Path.GetFullPath("/repo"), ".orca", "runs", "recipe-tagging");
+
+        Assert.Equal(
+            Path.Combine(expectedDir, "01-tag-entity.attempt-2.build.txt"),
+            layout.GateOutputFile("recipe-tagging", "01-tag-entity", 2, "build"));
+        Assert.Equal(
+            Path.Combine(expectedDir, "01-tag-entity.attempt-2.tests.txt"),
+            layout.GateOutputFile("recipe-tagging", "01-tag-entity", 2, "tests"));
+        Assert.ThrowsAny<ArgumentException>(() =>
+            layout.GateOutputFile("recipe-tagging", "01-tag-entity", 2, "lint"));
+    }
+
+    [Fact]
+    public void Role_invocations_number_their_parse_retries_within_an_attempt()
+    {
+        var layout = new RunLogLayout("/repo");
+        var expectedDir = Path.Combine(Path.GetFullPath("/repo"), ".orca", "runs", "recipe-tagging");
+
+        var paths = layout.RoleAttemptPaths("recipe-tagging", "01-tag-entity", 2, "reconciler", 3);
+        Assert.Equal(Path.Combine(expectedDir, "01-tag-entity.attempt-2.reconciler-3.ndjson"), paths.EventLog);
+        Assert.Equal(Path.Combine(expectedDir, "01-tag-entity.attempt-2.reconciler-3.stderr.txt"), paths.Stderr);
+        Assert.Equal(
+            Path.Combine(expectedDir, "01-tag-entity.attempt-2.verifier-1.settings.json"),
+            layout.RoleSettingsFile("recipe-tagging", "01-tag-entity", 2, "verifier", 1));
+
+        Assert.ThrowsAny<ArgumentException>(() =>
+            layout.RoleAttemptPaths("recipe-tagging", "01-tag-entity", 2, "planner", 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            layout.RoleAttemptPaths("recipe-tagging", "01-tag-entity", 2, "verifier", 0));
+    }
 }
 
 public class RunLogWriterTests : IDisposable

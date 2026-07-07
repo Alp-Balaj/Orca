@@ -29,6 +29,10 @@ public sealed record OrcaConfig
     public required IReadOnlyList<string> BuildCommand { get; init; }
     public required IReadOnlyList<string> TestCommand { get; init; }
 
+    /// <summary>Wall-clock ceiling per gate command; null = unbounded (Ctrl-C is the
+    /// interactive fallback). On timeout the process tree is killed and the gate fails.</summary>
+    public required TimeSpan? GateTimeout { get; init; }
+
     /// <summary>Ceiling for the §5.4 structured-output parse-retry loop; consumed from
     /// step 6 on, required only then.</summary>
     public required int? MaxParseRetries { get; init; }

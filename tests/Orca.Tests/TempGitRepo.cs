@@ -16,6 +16,9 @@ internal sealed class TempGitRepo : IDisposable
         Git("init", "-b", "main");
         Git("config", "user.name", "Orca Tests");
         Git("config", "user.email", "tests@orca.local");
+        // Byte-identical checkouts on both development machines: a Windows-default
+        // autocrlf=true would rewrite LF fixtures as CRLF on reset/checkout.
+        Git("config", "core.autocrlf", "false");
         File.WriteAllText(Path.Combine(Root, "README.md"), "seed\n");
         Git("add", "-A");
         Git("commit", "-m", "seed");

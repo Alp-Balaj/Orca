@@ -42,6 +42,35 @@ public sealed class GitWorkspace
     public string DiffStat() =>
         GitProcess.Run(RepoRoot, ["diff", "--stat", "HEAD"]).Stdout.TrimEnd();
 
+    /// <summary>The complete uncommitted change set as reviewable text — what the
+    /// Reconciler and Verifier judge: <c>git diff HEAD</c> (tracked, staged + unstaged)
+    /// plus the full content of untracked files, which a plain diff omits. Untracked
+    /// paths come from <c>status --porcelain -z -uall</c> (NUL-separated, so no quoting
+    /// ambiguity; <c>-uall</c> lists files inside untracked directories individually).</summary>
+    public string FullDiff()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(GitProcess.Run(RepoRoot, ["diff", "HEAD"]).Stdout);
+
+        var status = GitProcess.Run(RepoRoot, ["status", "--porcelain", "-z", "-uall"]).Stdout;
+        foreach (var entry in status.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!entry.StartsWith("?? ", StringComparison.Ordinal))
+                continue;
+
+            var path = entry[3..];
+            sb.Append($"\n## New file (untracked): {path}\n\n");
+            var fullPath = Path.Combine(RepoRoot, path.Replace('/', Path.DirectorySeparatorChar));
+            var bytes = File.ReadAllBytes(fullPath);
+            if (Array.IndexOf(bytes, (byte)0, 0, Math.Min(bytes.Length, 8000)) >= 0)
+                sb.Append($"(binary file, {bytes.Length} bytes — content omitted)\n");
+            else
+                sb.Append(System.Text.Encoding.UTF8.GetString(bytes)).Append('\n');
+        }
+
+        return sb.ToString();
+    }
+
     public string CurrentBranch()
     {
         var branch = GitProcess.Run(RepoRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).Stdout.Trim();

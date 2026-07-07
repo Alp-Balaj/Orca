@@ -61,4 +61,29 @@ public sealed class VaultReader(VaultLayout layout)
         var records = ReadVerificationRecords(planId, checkpointId);
         return records.Count == 0 ? 1 : records[^1].Attempt + 1;
     }
+
+    /// <summary>All reconciliation records for a checkpoint, ordered by attempt. Only
+    /// Orca-validated files ever land in <c>reconciliation/</c> (raw role output stays in
+    /// staging), so a parse failure here means the vault was edited by hand.</summary>
+    public IReadOnlyList<ReconciliationRecord> ReadReconciliationRecords(string planId, string checkpointId)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        VaultLayout.ValidateCheckpointId(checkpointId);
+
+        var directory = layout.ReconciliationDirectory(planId);
+        if (!Directory.Exists(directory))
+            return [];
+
+        var records = new List<ReconciliationRecord>();
+        foreach (var file in Directory.EnumerateFiles(directory, $"{checkpointId}.attempt-*.md"))
+        {
+            var record = ReconciliationRecordParser.Parse(File.ReadAllText(file), file);
+            if (!string.Equals(record.PlanId, planId, StringComparison.Ordinal))
+                throw new VaultSchemaException(file,
+                    $"reconciliation record belongs to plan '{record.PlanId}' but sits in plan '{planId}''s folder");
+            records.Add(record);
+        }
+
+        return [.. records.OrderBy(r => r.Attempt)];
+    }
 }

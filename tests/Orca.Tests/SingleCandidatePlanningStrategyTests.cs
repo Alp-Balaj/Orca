@@ -29,6 +29,7 @@ public sealed class SingleCandidatePlanningStrategyTests : IDisposable
         PlansDir = "Plans",
         BuildCommand = ["dotnet", "build"],
         TestCommand = ["dotnet", "test"],
+        GateTimeout = null,
         MaxParseRetries = maxParseRetries,
         MaxCheckpointAttempts = null,
         PlanningCandidates = null,

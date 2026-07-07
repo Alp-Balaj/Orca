@@ -9,6 +9,8 @@
          the assembly so the packed `orca` tool carries them; the recorded prompt-file
          hash is of this embedded content. -->
     <EmbeddedResource Include="../../prompts/planner.md" LogicalName="Orca.Core.Prompts.planner.md" />
+    <EmbeddedResource Include="../../prompts/reconciler.md" LogicalName="Orca.Core.Prompts.reconciler.md" />
+    <EmbeddedResource Include="../../prompts/verifier.md" LogicalName="Orca.Core.Prompts.verifier.md" />
   </ItemGroup>
 
 </Project>
