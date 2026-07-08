@@ -38,6 +38,155 @@ contract test deliberately, on a logged-in machine (~$0.20 of subscription quota
 Process-mechanics tests (timeout kill, resolver) run by default and skip visibly when no
 `claude` binary is on PATH.
 
+## How to use
+
+The manual for driving Orca against a repository. The sections after it (Commands,
+Configuration, Auth) are the reference detail. Everything below was exercised for real
+in the first end-to-end run (RecipeApp health endpoint, 2026-07-08).
+
+### Prerequisites
+
+- .NET SDK 10.0.x and Claude Code CLI **2.1.201** (the pinned contract version) on PATH.
+- A one-time interactive `claude` login on the machine (Pro/Max subscription). That login
+  is the only credential Orca ever uses — there is no API key to configure, and a
+  logged-out machine fails loudly at invocation time.
+- An Obsidian vault (any directory of Markdown works) and a target repository under git.
+- An interactive terminal. `checkpoint-run` ends in a real selection prompt; running it
+  from a non-TTY context (CI, a piped shell) currently crashes at that prompt *after*
+  the pipeline has run — a known limitation. The work is not lost (see Resuming below),
+  but drive it from a normal terminal.
+
+### Install
+
+    dotnet pack src/Orca.Cli -c Release
+    dotnet tool install --global --add-source src/Orca.Cli/bin/Release orca.cli
+
+That puts `orca` on PATH. `orca --help` lists the four commands.
+
+### One-time machine setup
+
+Create the global config — `%APPDATA%\orca\config.json` on Windows,
+`~/.config/orca/config.json` on Linux/macOS. It maps vault *names* to machine-local
+paths (so repo configs stay portable) and carries the machine-level deny rules that no
+repo can remove:
+
+    {
+      "schemaVersion": 1,
+      "vaults": {
+        "my-vault": "C:/Users/me/Documents/MyVault"
+      },
+      "deniedTools": [
+        "Bash(git push*)", "Bash(git commit*)", "Bash(git reset*)",
+        "Bash(git checkout*)", "Bash(git switch*)", "Bash(git restore*)",
+        "Bash(git clean*)", "Bash(git rebase*)", "Bash(git merge*)",
+        "Bash(rm*)", "Bash(rmdir*)", "Bash(del *)"
+      ]
+    }
+
+### Per-repository setup
+
+Commit an `orca.json` at the target repo's root. Minimal working shape (this is the
+config the e2e run used, trimmed):
+
+    {
+      "schemaVersion": 1,
+      "vault": {
+        "name": "my-vault",
+        "plansDir": "Projects/MyApp/Plans"
+      },
+      "commands": {
+        "build": ["dotnet", "build", "MyApp.slnx"],
+        "test":  ["dotnet", "test", "MyApp.slnx"]
+      },
+      "gateTimeoutSeconds": 600,
+      "maxParseRetries": 2,
+      "maxCheckpointAttempts": 3,
+      "roles": {
+        "planner":     { "allowedTools": ["Read", "Write", "Edit"],
+                         "maxTurns": 30, "timeoutSeconds": 900,  "maxBudgetUsd": 2 },
+        "implementer": { "allowedTools": ["Read", "Glob", "Grep", "Write", "Edit",
+                                          "Bash(dotnet build*)", "Bash(dotnet test*)",
+                                          "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)"],
+                         "maxTurns": 60, "timeoutSeconds": 1800, "maxBudgetUsd": 5 },
+        "reconciler":  { "allowedTools": ["Read", "Write", "Edit"],
+                         "maxTurns": 15, "timeoutSeconds": 600,  "maxBudgetUsd": 2 },
+        "verifier":    { "allowedTools": ["Read", "Write", "Edit"],
+                         "maxTurns": 15, "timeoutSeconds": 600,  "maxBudgetUsd": 2 }
+      }
+    }
+
+Notes: `commands.build`/`commands.test` are argv arrays run as plain processes — no
+shell, and they are the *gates*, so they must exit 0 on a healthy tree before you start.
+`maxBudgetUsd` values are runaway backstops, not targets (the whole e2e checkpoint cost
+$1.14). Use bare file-tool names (`Read`/`Write`/`Edit`): path-scoped rules like
+`Write(dir/**)` silently match nothing on CLI 2.1.201, because file tools receive
+absolute paths. Give the Implementer only the Bash prefixes your gates and diff-reading
+need; the deny list catches the rest.
+
+The first `plan-generate` or `checkpoint-run` in a repo appends `.orca/` to its
+`.gitignore` if missing and then **stops**, asking you to commit that — Orca never
+commits to your branch on its own. Commit it (or pre-add `.orca/` yourself) and re-run.
+
+### The loop
+
+**1. Get a plan into the vault.** Either have the Planner write one:
+
+    orca plan-generate <plan-id> --goal-file goal.md --repo <repo> [--dry-run]
+
+or scaffold one to write by hand: `orca plan-init <plan-id> --title "..."`. A good goal
+brief states the repository layout, the wanted outcome, an explicit checkpoint size, and
+— important — that every acceptance criterion must be checkable from the diff plus green
+gates alone. The Planner writes a **draft**; it cannot approve itself.
+
+**2. Review and approve the plan.** Read `<plansDir>/<plan-id>/<plan-id>.md`, edit what
+you disagree with, then flip `status: draft` → `status: approved` in its frontmatter.
+Nothing runs against a draft.
+
+**3. Run one checkpoint** from an interactive terminal:
+
+    orca checkpoint-run --repo <repo>
+
+(`--plan` only when the vault holds several plans; `--checkpoint` only to override the
+default first-pending; `--dry-run` first if you want to see the branch, prompt, and
+exact argv without spending anything.) Orca refuses a dirty tree, creates
+`orca/<plan-id>/<checkpoint-id>` off the base branch, runs the Implementer, then
+verifies automatically: build gate, test gate, Reconciler (`implements_plan:
+full|partial|none`), Verifier (per-criterion `pass|fail|unclear`). You get the rendered
+verdicts, the working-tree diffstat, and the decision prompt:
+
+- **Approve** — Orca commits everything on the checkpoint branch with a structured
+  message. Merging that branch into the base branch is *your* act, done however you
+  like (local merge, PR). Afterwards, mark the checkpoint `complete` in the plan file.
+- **Reject** — optionally hard-reset the branch (asked explicitly, never automatic).
+  The verification findings are already in the vault and ride the next attempt's
+  Implementer prompt; re-run `checkpoint-run` for attempt n+1 (capped by
+  `maxCheckpointAttempts`).
+- **Defer** — leave everything; the next `checkpoint-run` detects the undecided attempt
+  and comes straight back to this prompt without re-invoking anything.
+
+**4. Check where things stand** any time: `orca status --repo <repo>` — plan,
+checkpoints, latest verification verdict, accumulated cost.
+
+Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its own.
+
+### Resuming and failures
+
+Every interruption resumes without re-paying: rate limit, auth expiry, budget kill,
+timeout, and the non-TTY prompt crash all leave records + run state behind, and the next
+`checkpoint-run` continues from the first sub-step that has no record. Nothing is ever
+retried automatically; the CLI's own error text is printed with a per-cause hint (log in
+again, raise the ceiling, wait for the window). A failed gate writes the verification
+record from machine facts alone and spends nothing on the LLM roles.
+
+### Where everything lands
+
+- **Vault** (durable, reviewable): the plan file, `verification/` and `reconciliation/`
+  records per attempt (append-only, written by Orca itself after validation; `.staging/`
+  holds only rejected raw output, for inspection).
+- **Target repo `.orca/`** (gitignored, machine-local): per-attempt NDJSON transcripts,
+  gate output, the exact `--settings` payload used, and run state with per-checkpoint
+  accumulated cost and token usage (`.orca/state/<plan-id>.json`).
+
 ## Commands
 
     orca plan-init <plan-id> --title <title> [--base-branch main] [--repo <path>]
@@ -137,12 +286,22 @@ credential check.
 
 ## Status
 
-Build order (`docs/kickoff-v2.md` §9): **steps 1–7 complete** — scaffold, domain model +
+Build order (`docs/kickoff-v2.md` §9): **all 8 steps complete** — scaffold, domain model +
 strict frontmatter parsers, vault reader/writer, `ClaudeCodeExecutor` on the empirically
 captured 2.1.201 stream contract (fixtures in `tests/Orca.Tests/Fixtures/Transcripts/`),
 config loading + git mechanics + the `plan-init`/`checkpoint-run`/`status` commands,
 `IPlanningStrategy` with the single-candidate Planner (`plan-generate`) plus the
-stop-reason contract for shared-subscription failure modes, and the step-7 verification
-loop: deterministic gates, the Reconciler, the semantic Verifier, their §5.4 vault-file
+stop-reason contract for shared-subscription failure modes, the step-7 verification
+loop (deterministic gates, the Reconciler, the semantic Verifier, their §5.4 vault-file
 contracts with capped Reflexion retries, and the failed-verification → next-prompt
-feedback loop. Next session: step 8, one trivial checkpoint end-to-end against RecipeApp.
+feedback loop), and the step-8 end-to-end validation: the full pipeline live against a
+real repository — Planner-written plan, human approval, one implemented checkpoint,
+green gates, `implements_plan: full`, all criteria pass, human diff review, merge —
+with the per-checkpoint cost ($1.14) visible in run state and derivable from the run
+logs.
+
+Known limitations: `checkpoint-run` on a non-interactive terminal crashes unhandled at
+the decision prompt after the pipeline has spent quota (the deferred-decision resume
+recovers it free on an interactive re-run); path-scoped file-tool allowlist rules don't
+match on CLI 2.1.201 (use bare tool names + deny rules); multi-candidate planning is
+deferred (`--strategy multi` refuses clearly).
