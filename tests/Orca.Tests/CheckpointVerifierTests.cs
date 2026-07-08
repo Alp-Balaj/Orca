@@ -93,7 +93,7 @@ public sealed class CheckpointVerifierTests : IDisposable
         },
     };
 
-    private CheckpointVerifier Verifier(FakeRoleExecutor executor, OrcaConfig config) =>
+    private CheckpointVerifier Verifier(IClaudeExecutor executor, OrcaConfig config) =>
         new(config, GitWorkspace.Discover(_repo.Root), executor, _clock);
 
     private string StagingReconciliation(int attempt = 1) => Path.Combine(
@@ -257,6 +257,20 @@ public sealed class CheckpointVerifierTests : IDisposable
     }
 
     [Fact]
+    public async Task The_staging_directory_exists_before_the_reconciler_is_invoked()
+    {
+        // Claude Code's sandbox refuses to mkdir or write into a directory that doesn't
+        // already exist under its working directory in a non-interactive session — Orca,
+        // not the model, must guarantee `.staging` exists before the role runs.
+        var stagingDir = Path.Combine(_vault, "Plans", "recipe-tagging", ".staging");
+        var executor = new DirectoryCheckingExecutor(stagingDir);
+
+        await Verifier(executor, Config()).RunAsync(Plan, Checkpoint01, attempt: 1);
+
+        Assert.True(executor.DirectoryExistedOnInvocation);
+    }
+
+    [Fact]
     public async Task An_invocation_level_failure_stops_loudly_with_no_auto_retry()
     {
         var executor = new FakeRoleExecutor();
@@ -352,6 +366,21 @@ public sealed class CheckpointVerifierTests : IDisposable
         Assert.Equal(ReconcilerPrompt.RoleSha256, state.PromptHashes["reconciler"]);
         Assert.Equal(VerifierPrompt.RoleSha256, state.PromptHashes["verifier"]);
         Assert.Equal(InvocationStopReason.Succeeded, state.LastStopReason);
+    }
+
+    /// <summary>Records whether <paramref name="directory"/> already existed the moment
+    /// it was invoked, then fails loudly — enough to probe the precondition without
+    /// needing a parseable staging file.</summary>
+    private sealed class DirectoryCheckingExecutor(string directory) : IClaudeExecutor
+    {
+        public bool DirectoryExistedOnInvocation { get; private set; }
+
+        public Task<ClaudeExecutionResult> ExecuteAsync(
+            ClaudeInvocationOptions options, RunLogPaths logPaths, CancellationToken cancellationToken = default)
+        {
+            DirectoryExistedOnInvocation = Directory.Exists(directory);
+            return Task.FromResult(FakeRoleExecutor.RateLimited);
+        }
     }
 
     /// <summary>Scripted <see cref="IClaudeExecutor"/> — the planner tests' fake, reused

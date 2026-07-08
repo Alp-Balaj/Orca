@@ -125,6 +125,11 @@ public sealed class CheckpointVerifier(
             return baseline with { Record = failedRecord, RecordPath = path };
         }
 
+        // Claude Code's sandbox refuses to mkdir or write into a directory that doesn't
+        // already exist under its working directory in a non-interactive session, so
+        // Orca — not the Reconciler/Verifier — must guarantee `.staging` exists first.
+        Directory.CreateDirectory(_layout.StagingDirectory(plan.PlanId));
+
         var diff = workspace.FullDiff();
         var childNotePath = _layout.ChildNoteFile(plan.PlanId, checkpoint.Id);
         var childNote = File.Exists(childNotePath) ? reader.ReadChildNote(plan, checkpoint.Id) : null;
