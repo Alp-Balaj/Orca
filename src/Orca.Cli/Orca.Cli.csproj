@@ -12,4 +12,30 @@
     <PackageReference Include="Spectre.Console.Cli" />
   </ItemGroup>
 
+  <!-- Version = 1.0.<commit count>, plus -dirty when the tree has uncommitted changes,
+       so every commit packs a distinguishable .nupkg and `dotnet tool list` can answer
+       "is this the build I think it is". Must run as a target (not a static property):
+       the value has to come from git at build time, and PackageVersion is captured from
+       Version during static evaluation, so it is re-set here explicitly. The short SHA
+       lands in InformationalVersion via SourceRevisionId (SDK appends "+g<sha>"). -->
+  <Target Name="ComputeVersionFromGit"
+          BeforeTargets="GetAssemblyVersion;GenerateNuspec"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="git rev-list --count HEAD" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitCount" />
+    </Exec>
+    <Exec Command="git rev-parse --short HEAD" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShortSha" />
+    </Exec>
+    <Exec Command="git status --porcelain" ConsoleToMSBuild="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitStatus" />
+    </Exec>
+    <PropertyGroup>
+      <_GitDirtySuffix Condition="'$(_GitStatus)' != ''">-dirty</_GitDirtySuffix>
+      <Version>1.0.$(_GitCommitCount)$(_GitDirtySuffix)</Version>
+      <PackageVersion>$(Version)</PackageVersion>
+      <SourceRevisionId>g$(_GitShortSha)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+
 </Project>
