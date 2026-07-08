@@ -64,7 +64,7 @@ in the first end-to-end run (RecipeApp health endpoint, 2026-07-08).
 That puts `orca` on PATH. `orca --help` lists the four commands.
 
 The packed version is derived from git at pack time: `1.0.<commit count>`, with a
-`-dirty` suffix when the working tree had uncommitted changes (so `1.0.11`, or
+`-dirty` suffix when tracked files had uncommitted changes at pack time (so `1.0.11`, or
 `1.0.11-dirty`). `dotnet tool list --global` therefore answers "which build is this?" —
 cross-reference the patch number against `git rev-list --count HEAD`, and the short
 commit SHA is embedded in the assembly's InformationalVersion (`1.0.11+g20b60ea`).
