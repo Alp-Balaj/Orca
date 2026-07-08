@@ -63,6 +63,37 @@ in the first end-to-end run (RecipeApp health endpoint, 2026-07-08).
 
 That puts `orca` on PATH. `orca --help` lists the four commands.
 
+The packed version is derived from git at pack time: `1.0.<commit count>`, with a
+`-dirty` suffix when the working tree had uncommitted changes (so `1.0.11`, or
+`1.0.11-dirty`). `dotnet tool list --global` therefore answers "which build is this?" —
+cross-reference the patch number against `git rev-list --count HEAD`, and the short
+commit SHA is embedded in the assembly's InformationalVersion (`1.0.11+g20b60ea`).
+
+### Updating an installed tool
+
+Because every commit produces a higher version, the normal flow after pulling or
+committing changes is just:
+
+    dotnet pack src/Orca.Cli -c Release
+    dotnet tool update --global --add-source src/Orca.Cli/bin/Release orca.cli
+
+Two caveats, both because `dotnet tool update` compares version strings and skips
+anything that isn't strictly newer:
+
+- **Repacking the same commit with the same dirty state** produces an unchanged version
+  string, and `update` reports "already installed" and silently does nothing. To force
+  that build in, uninstall and reinstall:
+
+      dotnet tool uninstall --global orca.cli
+      dotnet tool install --global --add-source src/Orca.Cli/bin/Release orca.cli
+
+- **`-dirty` builds are prerelease versions**, which sort *below* the clean version of
+  the same commit, and old `.nupkg` files accumulate in `bin/Release` (plain `install`
+  picks the highest stable one). To install a dirty build, name it explicitly:
+
+      dotnet tool uninstall --global orca.cli
+      dotnet tool install --global --add-source src/Orca.Cli/bin/Release orca.cli --version 1.0.11-dirty
+
 ### One-time machine setup
 
 Create the global config — `%APPDATA%\orca\config.json` on Windows,
