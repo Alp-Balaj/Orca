@@ -1,0 +1,249 @@
+using Orca.Core.Config;
+using Orca.Core.Execution;
+using Orca.Core.Git;
+
+namespace Orca.Core.Run;
+
+public enum CheckpointSessionOutcome
+{
+    GitignoreAdded,          // stopped before running: commit the .gitignore change, re-run
+    InvocationFailed,        // implementer stop reason != succeeded; gate already consulted about partial changes
+    NoChanges,               // invocation succeeded but tree is clean — a failed attempt
+    VerificationIncomplete,  // pipeline stopped before a record (auth/rate-limit/budget/timeout/parse ceiling)
+    Approved,                // committed; CommitSha is set
+    Rejected,                // DiscardedChanges says whether the confirmed reset ran
+    Deferred,                // human deferred, or AutoDeferred on a non-interactive terminal
+    Interrupted,             // cancellation killed the invocation; run state resumes it, nothing re-paid
+}
+
+public sealed record CheckpointSessionResult
+{
+    public required CheckpointSessionOutcome Outcome { get; init; }
+    public required CheckpointRunPreview Preview { get; init; }
+    public CheckpointRunOutcome? Run { get; init; }
+    public CheckpointVerificationOutcome? Verification { get; init; }
+    public string? CommitSha { get; init; }
+    public bool DiscardedChanges { get; init; }
+    public bool AutoDeferred { get; init; }
+    public decimal? AttemptCostUsd { get; init; }
+}
+
+/// <summary>One human-triggered checkpoint session, start to decision. Owns the exact
+/// sequence CheckpointRunCommand owned before it (§3.3): gitignore guard →
+/// pending-decision resume → run → failure branching → verification → decision
+/// application. The three points where it consults the human are the
+/// <see cref="ICheckpointGate"/> — the gate renders and answers, it never mutates;
+/// approval and rejection remain <see cref="CheckpointRunner"/> methods the session
+/// calls after the gate has spoken. Both front ends are thin callers of this class, so
+/// the sequence can no longer fork between them.</summary>
+public sealed class CheckpointRunSession(OrcaConfig config, GitWorkspace workspace, IClaudeExecutor executor)
+{
+    private readonly CheckpointRunner _runner = new(config, workspace, executor);
+    private readonly CheckpointVerifier _verifier = new(config, workspace, executor);
+
+    /// <summary>Read-only; delegates to CheckpointRunner.Prepare. Front ends render the
+    /// preview (and --dry-run stops here, exactly as today).</summary>
+    public CheckpointRunPreview Prepare(string? planId, string? checkpointId) =>
+        _runner.Prepare(planId, checkpointId);
+
+    public async Task<CheckpointSessionResult> ExecuteAsync(
+        CheckpointRunPreview preview,
+        ICheckpointGate gate,
+        IRunObserver? observer = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return preview.PendingDecision
+                ? await ResumePendingDecisionAsync(preview, gate, observer, cancellationToken)
+                : await RunFreshAttemptAsync(preview, gate, observer, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The executor already killed the process tree and the existing resume
+            // machinery (records + run state) recovers the attempt without re-paying —
+            // an interrupt is the Ctrl-C the CLI always had, made explicit and recorded.
+            return new CheckpointSessionResult
+            {
+                Outcome = CheckpointSessionOutcome.Interrupted,
+                Preview = preview,
+            };
+        }
+    }
+
+    private async Task<CheckpointSessionResult> RunFreshAttemptAsync(
+        CheckpointRunPreview preview, ICheckpointGate gate, IRunObserver? observer,
+        CancellationToken cancellationToken)
+    {
+        // .orca/ must be ignored before run logs exist: approval's `git add -A` must not
+        // sweep them into history, and rejection's `git clean -fd` must not delete them.
+        // Stopping here is a workflow rule, not presentation — Orca never commits the
+        // .gitignore change to the human's branch on its own.
+        if (OrcaIgnore.EnsureIgnored(workspace.RepoRoot))
+        {
+            return new CheckpointSessionResult
+            {
+                Outcome = CheckpointSessionOutcome.GitignoreAdded,
+                Preview = preview,
+            };
+        }
+
+        var run = await _runner.RunAsync(preview, observer, cancellationToken);
+
+        if (run.Execution.Outcome == ExecutionOutcome.TimedOut || run.Execution.Result is not { IsError: false })
+        {
+            var discarded = false;
+            if (!workspace.IsClean()
+                && await gate.ConfirmDiscardAfterFailureAsync(
+                    Context(preview, run, verification: null, run.Execution.Result?.TotalCostUsd),
+                    cancellationToken))
+            {
+                _runner.Reject(discardChanges: true);
+                discarded = true;
+            }
+
+            return new CheckpointSessionResult
+            {
+                Outcome = CheckpointSessionOutcome.InvocationFailed,
+                Preview = preview,
+                Run = run,
+                DiscardedChanges = discarded,
+                AttemptCostUsd = run.Execution.Result?.TotalCostUsd,
+            };
+        }
+
+        if (workspace.IsClean())
+        {
+            return new CheckpointSessionResult
+            {
+                Outcome = CheckpointSessionOutcome.NoChanges,
+                Preview = preview,
+                Run = run,
+                AttemptCostUsd = run.Execution.Result?.TotalCostUsd,
+            };
+        }
+
+        // The pipeline runs automatically after the Implementer — gates first (machine
+        // facts), then Reconciler and semantic Verifier only if the gates pass.
+        var verification = await _verifier.RunAsync(
+            preview.Plan, preview.Checkpoint, preview.Attempt, observer, cancellationToken);
+        var attemptCost = (run.Execution.Result?.TotalCostUsd ?? 0m) + verification.CostUsd;
+        if (verification.Record is null)
+        {
+            return new CheckpointSessionResult
+            {
+                Outcome = CheckpointSessionOutcome.VerificationIncomplete,
+                Preview = preview,
+                Run = run,
+                Verification = verification,
+                AttemptCostUsd = attemptCost,
+            };
+        }
+
+        return await DecideAsync(preview, run, verification, attemptCost, gate, cancellationToken);
+    }
+
+    /// <summary>The deferred-decision resume: a pending attempt with no verification
+    /// record is offered the pipeline first — gates re-run (cheap, deterministic) and
+    /// only the sub-steps without records pay quota. Declining spends nothing; the
+    /// decision is asked either way.</summary>
+    private async Task<CheckpointSessionResult> ResumePendingDecisionAsync(
+        CheckpointRunPreview preview, ICheckpointGate gate, IRunObserver? observer,
+        CancellationToken cancellationToken)
+    {
+        var pendingAttempt = preview.Attempt - 1;
+
+        CheckpointVerificationOutcome? verification = null;
+        if (_verifier.HasRecord(preview.Plan.PlanId, preview.Checkpoint.Id, pendingAttempt))
+        {
+            verification = await _verifier.RunAsync(
+                preview.Plan, preview.Checkpoint, pendingAttempt, observer, cancellationToken);
+        }
+        else if (await gate.ConfirmVerifyPendingAsync(pendingAttempt, cancellationToken))
+        {
+            verification = await _verifier.RunAsync(
+                preview.Plan, preview.Checkpoint, pendingAttempt, observer, cancellationToken);
+            if (verification.Record is null)
+            {
+                return new CheckpointSessionResult
+                {
+                    Outcome = CheckpointSessionOutcome.VerificationIncomplete,
+                    Preview = preview,
+                    Verification = verification,
+                    AttemptCostUsd = verification.CostUsd,
+                };
+            }
+        }
+
+        // The resumed attempt's Implementer cost lives in run state, not in hand; the
+        // commit message's per-attempt cost is deliberately omitted on resume (as today).
+        return await DecideAsync(preview, run: null, verification, attemptCostUsd: null, gate, cancellationToken);
+    }
+
+    /// <summary>The per-checkpoint human gate (spec §7.1). Approve commits; Reject offers
+    /// — never performs — a hard reset; Defer leaves everything for a later session,
+    /// which resumes this decision instead of re-invoking.</summary>
+    private async Task<CheckpointSessionResult> DecideAsync(
+        CheckpointRunPreview preview,
+        CheckpointRunOutcome? run,
+        CheckpointVerificationOutcome? verification,
+        decimal? attemptCostUsd,
+        ICheckpointGate gate,
+        CancellationToken cancellationToken)
+    {
+        var decision = await gate.DecideAsync(
+            Context(preview, run, verification, attemptCostUsd), cancellationToken);
+
+        switch (decision.Choice)
+        {
+            case CheckpointChoice.Approve:
+                var sha = _runner.Approve(preview, attemptCostUsd);
+                return new CheckpointSessionResult
+                {
+                    Outcome = CheckpointSessionOutcome.Approved,
+                    Preview = preview,
+                    Run = run,
+                    Verification = verification,
+                    CommitSha = sha,
+                    AttemptCostUsd = attemptCostUsd,
+                };
+
+            case CheckpointChoice.Reject:
+                _runner.Reject(decision.DiscardChanges);
+                return new CheckpointSessionResult
+                {
+                    Outcome = CheckpointSessionOutcome.Rejected,
+                    Preview = preview,
+                    Run = run,
+                    Verification = verification,
+                    DiscardedChanges = decision.DiscardChanges,
+                    AttemptCostUsd = attemptCostUsd,
+                };
+
+            default:
+                return new CheckpointSessionResult
+                {
+                    Outcome = CheckpointSessionOutcome.Deferred,
+                    Preview = preview,
+                    Run = run,
+                    Verification = verification,
+                    AutoDeferred = decision.AutoDeferred,
+                    AttemptCostUsd = attemptCostUsd,
+                };
+        }
+    }
+
+    private CheckpointDecisionContext Context(
+        CheckpointRunPreview preview,
+        CheckpointRunOutcome? run,
+        CheckpointVerificationOutcome? verification,
+        decimal? attemptCostUsd) => new()
+    {
+        Preview = preview,
+        Run = run,
+        Verification = verification,
+        StatusLines = workspace.StatusLines(),
+        DiffStat = workspace.DiffStat(),
+        AttemptCostUsd = attemptCostUsd,
+    };
+}

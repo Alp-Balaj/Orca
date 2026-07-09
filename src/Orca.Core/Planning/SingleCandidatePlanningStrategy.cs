@@ -107,7 +107,8 @@ public sealed class SingleCandidatePlanningStrategy(
     }
 
     public async Task<PlanningOutcome> GenerateAsync(
-        PlanningPreview preview, CancellationToken cancellationToken = default)
+        PlanningPreview preview, IRunObserver? observer = null,
+        CancellationToken cancellationToken = default)
     {
         var request = preview.Request;
         var now = _clock.GetUtcNow();
@@ -143,9 +144,18 @@ public sealed class SingleCandidatePlanningStrategy(
                 File.WriteAllText(settingsPath, preview.SettingsJson!);
             }
 
+            // Planner run logs are numbered per attempt (planning.attempt-<n>), and each
+            // §5.4 parse retry advances the attempt itself — so for this role attempt and
+            // invocation coincide, keeping RoleStarted's invocation matched to the log
+            // file name exactly as it is for the Reconciler/Verifier.
+            observer?.OnRunEvent(new RunObservation.RoleStarted(
+                RoleName.Planner, attempt, attempt, logPaths.EventLog));
             var startedAt = _clock.GetUtcNow();
-            var execution = await executor.ExecuteAsync(options, logPaths, observer: null, cancellationToken);
+            var execution = await executor.ExecuteAsync(options, logPaths,
+                observer is null ? null : new RoleStreamForwarder(observer, RoleName.Planner),
+                cancellationToken);
             var endedAt = _clock.GetUtcNow();
+            observer?.OnRunEvent(new RunObservation.RoleFinished(RoleName.Planner, execution));
             var stopReason = execution.StopReason;
 
             string? parseFailure = null;
@@ -186,6 +196,9 @@ public sealed class SingleCandidatePlanningStrategy(
             if (parseFailure is null)
             {
                 _stateStore.Write(state = state with { Status = PlanningRunStatus.Succeeded });
+                // The plan file becomes the canonical record the moment it survives the
+                // strict parse + generated-plan rules — that is when it "lands".
+                observer?.OnRunEvent(new RunObservation.VaultRecordWritten("plan", preview.PlanFilePath));
                 return Outcome(state, preview, plan, execution, failureDetail: null);
             }
 
@@ -199,6 +212,7 @@ public sealed class SingleCandidatePlanningStrategy(
 
             _stateStore.Write(state);
             attempt = NextFreeAttempt(request.PlanId, attempt + 1);
+            observer?.OnRunEvent(new RunObservation.RoleParseRetry(RoleName.Planner, parseFailure, attempt));
             prompt = PlannerPrompt.AssembleRetry(
                 request, preview.RelativePlanPath, preview.RequestedTimestamp, parseFailure);
             logPaths = _logLayout.PlanningAttemptPaths(request.PlanId, attempt);

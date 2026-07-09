@@ -64,7 +64,8 @@ public sealed class CheckpointVerifier(
         File.Exists(_layout.VerificationFile(planId, checkpointId, attempt));
 
     public async Task<CheckpointVerificationOutcome> RunAsync(
-        Plan plan, Checkpoint checkpoint, int attempt, CancellationToken cancellationToken = default)
+        Plan plan, Checkpoint checkpoint, int attempt, IRunObserver? observer = null,
+        CancellationToken cancellationToken = default)
     {
         var reader = new VaultReader(_layout);
         var writer = new VaultWriter(_layout);
@@ -112,16 +113,21 @@ public sealed class CheckpointVerifier(
         // always run; recording an outcome for a command that never ran would be a lie
         // in a typed field.
         var gateRunner = new GateRunner(config.GateTimeout);
+        observer?.OnRunEvent(new RunObservation.GateStarted("build", config.BuildCommand));
         var build = gateRunner.Run("build", config.BuildCommand, workspace.RepoRoot,
             _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "build"));
+        observer?.OnRunEvent(new RunObservation.GateFinished(build));
+        observer?.OnRunEvent(new RunObservation.GateStarted("tests", config.TestCommand));
         var tests = gateRunner.Run("tests", config.TestCommand, workspace.RepoRoot,
             _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "tests"));
+        observer?.OnRunEvent(new RunObservation.GateFinished(tests));
         baseline = baseline with { BuildGate = build, TestsGate = tests };
 
         if (build.Outcome == GateOutcome.Fail || tests.Outcome == GateOutcome.Fail)
         {
             var failedRecord = ComposeRecord(identity, build, tests, checklist: null);
             var path = writer.WriteVerificationRecord(failedRecord);
+            observer?.OnRunEvent(new RunObservation.VaultRecordWritten("verification", path));
             return baseline with { Record = failedRecord, RecordPath = path };
         }
 
@@ -148,13 +154,14 @@ public sealed class CheckpointVerifier(
                 identity, stagingPath, maxParseRetries,
                 previousError => ReconcilerPrompt.Assemble(identity, relativeStaging, planSection, diff, previousError),
                 fileText => ReconciliationRecordParser.ParseStaging(fileText, stagingPath, identity),
-                cancellationToken);
+                observer, cancellationToken);
             baseline = baseline with { CostUsd = baseline.CostUsd + role.CostUsd };
             if (role.Failure is not null)
                 return Failed(baseline, role.Failure);
 
             reconciliation = role.Value!;
             var reconciliationPath = writer.WriteReconciliationRecord(reconciliation);
+            observer?.OnRunEvent(new RunObservation.VaultRecordWritten("reconciliation", reconciliationPath));
             File.Delete(stagingPath);
             baseline = baseline with { Reconciliation = reconciliation, ReconciliationPath = reconciliationPath };
         }
@@ -177,13 +184,14 @@ public sealed class CheckpointVerifier(
                 identity, relativeSemantic, checkpoint.AcceptanceCriteria, build, tests, diff, previousError),
             fileText => SemanticChecklistParser.ParseStaging(
                 fileText, semanticStaging, identity, checkpoint.AcceptanceCriteria),
-            cancellationToken);
+            observer, cancellationToken);
         baseline = baseline with { CostUsd = baseline.CostUsd + verifierRole.CostUsd };
         if (verifierRole.Failure is not null)
             return Failed(baseline, verifierRole.Failure);
 
         var record = ComposeRecord(identity, build, tests, verifierRole.Value!);
         var recordPath = writer.WriteVerificationRecord(record);
+        observer?.OnRunEvent(new RunObservation.VaultRecordWritten("verification", recordPath));
         File.Delete(semanticStaging);
         return baseline with { Record = record, RecordPath = recordPath };
     }
@@ -206,6 +214,7 @@ public sealed class CheckpointVerifier(
         int maxParseRetries,
         Func<string?, string> assemblePrompt,
         Func<string, T> parseStaging,
+        IRunObserver? observer,
         CancellationToken cancellationToken) where T : class
     {
         var role = config.GetRole(roleName);
@@ -240,7 +249,12 @@ public sealed class CheckpointVerifier(
             var logPaths = _logLayout.RoleAttemptPaths(
                 identity.PlanId, identity.CheckpointId, identity.Attempt, roleKey, invocation);
 
-            var execution = await executor.ExecuteAsync(options, logPaths, observer: null, cancellationToken);
+            observer?.OnRunEvent(new RunObservation.RoleStarted(
+                roleName, identity.Attempt, invocation, logPaths.EventLog));
+            var execution = await executor.ExecuteAsync(options, logPaths,
+                observer is null ? null : new RoleStreamForwarder(observer, roleName),
+                cancellationToken);
+            observer?.OnRunEvent(new RunObservation.RoleFinished(roleName, execution));
             cost += execution.Result?.TotalCostUsd ?? 0m;
             RecordInvocation(identity.PlanId, roleKey, roleSha256, execution);
 
@@ -284,6 +298,7 @@ public sealed class CheckpointVerifier(
 
             previousError = parseFailure;
             invocation = NextFreeInvocation(identity, roleKey, invocation + 1);
+            observer?.OnRunEvent(new RunObservation.RoleParseRetry(roleName, parseFailure, invocation));
         }
     }
 

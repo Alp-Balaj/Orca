@@ -10,7 +10,9 @@ using Spectre.Console.Cli;
 namespace Orca.Cli.Commands;
 
 /// <summary>Shows the plan's checkpoint statuses and the run state — everything needed to
-/// resume a run cold (spec §5.3).</summary>
+/// resume a run cold (spec §5.3). Since the §3.4 extraction this is a thin renderer over
+/// the StatusReport query; resolution semantics (explicit --plan wins, otherwise exactly
+/// one plan must exist) are unchanged.</summary>
 public sealed class StatusCommand : Command<StatusCommand.Settings>
 {
     public sealed class Settings : CommandSettings
@@ -29,16 +31,17 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         var workspace = GitWorkspace.Discover(settings.Repo ?? Directory.GetCurrentDirectory());
         var config = ConfigLoader.Load(workspace.RepoRoot);
         var layout = new VaultLayout(config.VaultRoot, config.PlansDir);
-        var reader = new VaultReader(layout);
 
         var planId = PlanLocator.ResolvePlanId(layout, settings.Plan);
-        var plan = reader.ReadPlan(planId);
-        var state = new RunStateStore(workspace.RepoRoot).Read(planId);
+        var report = StatusReportBuilder.Build(config, workspace, planId);
+        var entry = report.Plans[0];
+        var plan = entry.Plan;
+        var state = entry.RunState;
 
         AnsiConsole.MarkupLine(
             $"[bold]{plan.Title.EscapeMarkup()}[/] — {plan.PlanId.EscapeMarkup()} v{plan.PlanVersion}, status [bold]{plan.Status}[/], base branch {plan.BaseBranch.EscapeMarkup()}");
         AnsiConsole.MarkupLine(
-            $"repo {workspace.RepoRoot.EscapeMarkup()} on branch [bold]{workspace.CurrentBranch().EscapeMarkup()}[/]{(workspace.IsClean() ? "" : " [yellow](dirty)[/]")}");
+            $"repo {report.RepoRoot.EscapeMarkup()} on branch [bold]{report.CurrentBranch.EscapeMarkup()}[/]{(report.WorkingTreeClean ? "" : " [yellow](dirty)[/]")}");
         AnsiConsole.WriteLine();
 
         var table = new Table().AddColumns("", "checkpoint", "description", "status");
@@ -68,10 +71,9 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         var runTable = new Table().HideHeaders().Border(TableBorder.None).AddColumns("k", "v");
         runTable.AddRow("last checkpoint", $"{state.CheckpointId.EscapeMarkup()} attempt {state.Attempt} on {state.Branch.EscapeMarkup()}");
 
-        var verifications = reader.ReadVerificationRecords(planId, state.CheckpointId);
-        if (verifications.Count > 0)
+        if (entry.Evidence.TryGetValue(state.CheckpointId, out var evidence)
+            && evidence.LatestVerification is { } latest)
         {
-            var latest = verifications[^1];
             var verdict = latest.Verdict == VerificationVerdict.Pass ? "[green]pass[/]" : "[red]fail[/]";
             runTable.AddRow("verification", $"{verdict} (attempt {latest.Attempt}, gates: build {SchemaYaml(latest.Gates.Build)}, tests {SchemaYaml(latest.Gates.Tests)})");
         }

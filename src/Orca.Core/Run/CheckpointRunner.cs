@@ -152,9 +152,12 @@ public sealed class CheckpointRunner(
 
     /// <summary>The mutating half: branch mechanics, settings file, run state, one
     /// executor invocation. The clean-tree requirement is enforced by
-    /// <see cref="GitWorkspace"/> at the branch operations (spec §7.1).</summary>
+    /// <see cref="GitWorkspace"/> at the branch operations (spec §7.1). The observer
+    /// (§3.2) sees the pipeline facts the executor cannot know — branch, role lifecycle —
+    /// plus the role-tagged stream; null keeps today's behavior exactly.</summary>
     public async Task<CheckpointRunOutcome> RunAsync(
-        CheckpointRunPreview preview, CancellationToken cancellationToken = default)
+        CheckpointRunPreview preview, IRunObserver? observer = null,
+        CancellationToken cancellationToken = default)
     {
         if (preview.PendingDecision)
             throw new CheckpointRunException(
@@ -164,6 +167,7 @@ public sealed class CheckpointRunner(
             workspace.CreateBranchFrom(preview.Branch, preview.Plan.BaseBranch);
         else
             workspace.SwitchTo(preview.Branch);
+        observer?.OnRunEvent(new RunObservation.BranchReady(preview.Branch, Created: !preview.BranchExists));
 
         if (preview.Options.SettingsFilePath is { } settingsPath)
         {
@@ -194,8 +198,15 @@ public sealed class CheckpointRunner(
         };
         _stateStore.Write(state);
 
+        // The Implementer has no §5.4 parse-retry loop, so its invocation number within
+        // the attempt is always 1 (log stem: <checkpoint>.attempt-<n>.ndjson).
+        observer?.OnRunEvent(new RunObservation.RoleStarted(
+            RoleName.Implementer, preview.Attempt, Invocation: 1, preview.LogPaths.EventLog));
         var execution = await executor.ExecuteAsync(
-            preview.Options, preview.LogPaths, observer: null, cancellationToken);
+            preview.Options, preview.LogPaths,
+            observer is null ? null : new RoleStreamForwarder(observer, RoleName.Implementer),
+            cancellationToken);
+        observer?.OnRunEvent(new RunObservation.RoleFinished(RoleName.Implementer, execution));
 
         var updated = RunStateUpdates.Apply(state, execution, _clock.GetUtcNow());
         _stateStore.Write(updated);

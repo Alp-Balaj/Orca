@@ -1,5 +1,6 @@
 using Orca.Core.Domain;
 using Orca.Core.Execution;
+using Orca.Core.Run;
 
 namespace Orca.Core.Planning;
 
@@ -80,6 +81,9 @@ public interface IPlanningStrategy
 
     /// <summary>The mutating half: executor invocations (initial plus capped parse
     /// retries), planning state, run logs. One call = one human-authorized planning run;
-    /// invocation-level failures (auth, rate limit, budget, timeout) end it loudly.</summary>
-    Task<PlanningOutcome> GenerateAsync(PlanningPreview preview, CancellationToken cancellationToken = default);
+    /// invocation-level failures (auth, rate limit, budget, timeout) end it loudly.
+    /// The observer (§3.2) sees the Planner's role lifecycle and tagged stream; null
+    /// keeps today's behavior exactly.</summary>
+    Task<PlanningOutcome> GenerateAsync(PlanningPreview preview, IRunObserver? observer = null,
+        CancellationToken cancellationToken = default);
 }
