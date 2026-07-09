@@ -144,7 +144,7 @@ public sealed class SingleCandidatePlanningStrategy(
             }
 
             var startedAt = _clock.GetUtcNow();
-            var execution = await executor.ExecuteAsync(options, logPaths, cancellationToken);
+            var execution = await executor.ExecuteAsync(options, logPaths, observer: null, cancellationToken);
             var endedAt = _clock.GetUtcNow();
             var stopReason = execution.StopReason;
 

@@ -194,7 +194,8 @@ public sealed class CheckpointRunner(
         };
         _stateStore.Write(state);
 
-        var execution = await executor.ExecuteAsync(preview.Options, preview.LogPaths, cancellationToken);
+        var execution = await executor.ExecuteAsync(
+            preview.Options, preview.LogPaths, observer: null, cancellationToken);
 
         var updated = RunStateUpdates.Apply(state, execution, _clock.GetUtcNow());
         _stateStore.Write(updated);

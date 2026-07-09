@@ -438,7 +438,8 @@ public sealed class CheckpointRunnerTests : IDisposable
         public RunLogPaths? LastLogPaths { get; private set; }
 
         public Task<ClaudeExecutionResult> ExecuteAsync(
-            ClaudeInvocationOptions options, RunLogPaths logPaths, CancellationToken cancellationToken = default)
+            ClaudeInvocationOptions options, RunLogPaths logPaths,
+            IClaudeStreamObserver? observer = null, CancellationToken cancellationToken = default)
         {
             Invocations++;
             LastOptions = options;

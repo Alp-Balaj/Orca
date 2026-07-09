@@ -240,7 +240,7 @@ public sealed class CheckpointVerifier(
             var logPaths = _logLayout.RoleAttemptPaths(
                 identity.PlanId, identity.CheckpointId, identity.Attempt, roleKey, invocation);
 
-            var execution = await executor.ExecuteAsync(options, logPaths, cancellationToken);
+            var execution = await executor.ExecuteAsync(options, logPaths, observer: null, cancellationToken);
             cost += execution.Result?.TotalCostUsd ?? 0m;
             RecordInvocation(identity.PlanId, roleKey, roleSha256, execution);
 

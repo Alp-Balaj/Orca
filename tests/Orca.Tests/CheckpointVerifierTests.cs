@@ -376,7 +376,8 @@ public sealed class CheckpointVerifierTests : IDisposable
         public bool DirectoryExistedOnInvocation { get; private set; }
 
         public Task<ClaudeExecutionResult> ExecuteAsync(
-            ClaudeInvocationOptions options, RunLogPaths logPaths, CancellationToken cancellationToken = default)
+            ClaudeInvocationOptions options, RunLogPaths logPaths,
+            IClaudeStreamObserver? observer = null, CancellationToken cancellationToken = default)
         {
             DirectoryExistedOnInvocation = Directory.Exists(directory);
             return Task.FromResult(FakeRoleExecutor.RateLimited);
@@ -395,7 +396,8 @@ public sealed class CheckpointVerifierTests : IDisposable
             _script.Enqueue((result, sideEffect));
 
         public Task<ClaudeExecutionResult> ExecuteAsync(
-            ClaudeInvocationOptions options, RunLogPaths logPaths, CancellationToken cancellationToken = default)
+            ClaudeInvocationOptions options, RunLogPaths logPaths,
+            IClaudeStreamObserver? observer = null, CancellationToken cancellationToken = default)
         {
             Invocations.Add((options, logPaths));
             if (_script.Count == 0)

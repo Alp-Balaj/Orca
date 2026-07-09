@@ -8,5 +8,6 @@ public interface IClaudeExecutor
     Task<ClaudeExecutionResult> ExecuteAsync(
         ClaudeInvocationOptions options,
         RunLogPaths logPaths,
+        IClaudeStreamObserver? observer = null,
         CancellationToken cancellationToken = default);
 }

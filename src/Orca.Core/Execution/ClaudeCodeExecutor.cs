@@ -17,6 +17,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
     public async Task<ClaudeExecutionResult> ExecuteAsync(
         ClaudeInvocationOptions options,
         RunLogPaths logPaths,
+        IClaudeStreamObserver? observer = null,
         CancellationToken cancellationToken = default)
     {
         var argv = ClaudeArguments.Build(options);
@@ -55,9 +56,13 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
         var authenticationFailed = false;
         RateLimitInfo? lastRateLimit = null;
         StreamParseException? parseFailure = null;
+        var observerFailureRecorded = false;
 
         // Log-before-parse, and keep draining after a parse failure: the pipe must not
         // fill up (that would block the CLI), and the log must stay complete evidence.
+        // The observer sees the parsed event only after the raw line is logged — a second
+        // sink beside the log, never a gate: its exceptions are recorded once and never
+        // fail the invocation, and it never sees an unparseable line.
         var stdoutTask = Task.Run(async () =>
         {
             while (await process.StandardOutput.ReadLineAsync(CancellationToken.None) is { } line)
@@ -65,21 +70,43 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
                 runLog.WriteLine(line);
+                ClaudeStreamEvent streamEvent;
                 try
                 {
-                    var streamEvent = ClaudeStreamEvent.Parse(line);
-                    if (streamEvent.IsInit)
-                        sessionId ??= streamEvent.SessionId;
-                    if (streamEvent.Result is not null)
-                        result = streamEvent.Result;
-                    if (streamEvent.Error == "authentication_failed")
-                        authenticationFailed = true;
-                    if (streamEvent.RateLimit is not null)
-                        lastRateLimit = streamEvent.RateLimit;
+                    streamEvent = ClaudeStreamEvent.Parse(line);
                 }
                 catch (StreamParseException e)
                 {
                     parseFailure ??= e;
+                    continue;
+                }
+
+                if (streamEvent.IsInit)
+                    sessionId ??= streamEvent.SessionId;
+                if (streamEvent.Result is not null)
+                    result = streamEvent.Result;
+                if (streamEvent.Error == "authentication_failed")
+                    authenticationFailed = true;
+                if (streamEvent.RateLimit is not null)
+                    lastRateLimit = streamEvent.RateLimit;
+
+                if (observer is null)
+                    continue;
+                try
+                {
+                    observer.OnStreamEvent(streamEvent);
+                }
+                catch (Exception e)
+                {
+                    if (observerFailureRecorded)
+                        continue;
+                    observerFailureRecorded = true;
+                    runLog.WriteExecutorEvent("observer_failure", new Dictionary<string, object?>
+                    {
+                        ["observer"] = observer.GetType().FullName,
+                        ["exception"] = e.GetType().FullName,
+                        ["message"] = e.Message,
+                    });
                 }
             }
         }, CancellationToken.None);

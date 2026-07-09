@@ -27,22 +27,30 @@ public class ClaudeCodeExecutorTests : IDisposable
 
     /// <summary>An OS-appropriate script that replays a captured transcript on stdout
     /// and exits with the fixture's real exit code — full stream mechanics, no CLI, no
-    /// quota.</summary>
-    private string FakeCliReplaying(string fixtureName, int exitCode)
+    /// quota. <paramref name="appendLine"/> adds one trailing stdout line after the
+    /// fixture (the unparseable-line tests).</summary>
+    private string FakeCliReplaying(string fixtureName, int exitCode, string? appendLine = null)
     {
         var fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Transcripts", fixtureName);
         if (OperatingSystem.IsWindows())
         {
             var cmd = Path.Combine(_dir, "fake-claude.cmd");
-            File.WriteAllText(cmd, $"@echo off\r\ntype \"{fixture}\"\r\nexit /b {exitCode}\r\n");
+            var append = appendLine is null ? "" : $"echo {appendLine}\r\n";
+            File.WriteAllText(cmd, $"@echo off\r\ntype \"{fixture}\"\r\n{append}exit /b {exitCode}\r\n");
             return cmd;
         }
 
         var sh = Path.Combine(_dir, "fake-claude.sh");
-        File.WriteAllText(sh, $"#!/bin/sh\ncat \"{fixture}\"\nexit {exitCode}\n");
+        var appendSh = appendLine is null ? "" : $"echo '{appendLine}'\n";
+        File.WriteAllText(sh, $"#!/bin/sh\ncat \"{fixture}\"\n{appendSh}exit {exitCode}\n");
         File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return sh;
     }
+
+    private static string[] FixtureLines(string fixtureName) =>
+        File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Transcripts", fixtureName))
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToArray();
 
     [Fact]
     public async Task Auth_failure_replay_is_classified_and_logged_distinctly()
@@ -111,6 +119,82 @@ public class ClaudeCodeExecutorTests : IDisposable
 
         Assert.NotNull(resolved);
         Assert.True(File.Exists(resolved));
+    }
+
+    [Fact]
+    public async Task Observer_sees_every_parsed_event_in_arrival_order_before_return()
+    {
+        var options = Options() with
+        {
+            ClaudeExecutable = FakeCliReplaying("success.ndjson", exitCode: 0),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        var observer = new RecordingObserver();
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, Paths(), observer);
+
+        // ExecuteAsync awaits the pump, so by now the observer has seen the whole
+        // stream, in arrival order, one call per parsed event.
+        Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
+        Assert.Equal(FixtureLines("success.ndjson"), observer.Events.Select(e => e.RawLine).ToArray());
+    }
+
+    [Fact]
+    public async Task Observer_exceptions_never_fail_the_run_and_are_recorded_once()
+    {
+        var options = Options() with
+        {
+            ClaudeExecutable = FakeCliReplaying("success.ndjson", exitCode: 0),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        var paths = Paths();
+        var observer = new ThrowingObserver();
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, paths, observer);
+
+        Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
+        Assert.Equal(FixtureLines("success.ndjson").Length, observer.Calls); // still offered every event
+
+        var log = File.ReadAllLines(paths.EventLog);
+        Assert.Equal(1, log.Count(l => l.Contains("\"observer_failure\"")));
+        Assert.Contains(log, l =>
+            l.Contains("\"orca_executor\"") && l.Contains("\"observer_failure\"") && l.Contains("observer boom"));
+    }
+
+    [Fact]
+    public async Task Observer_never_sees_an_unparseable_line()
+    {
+        var options = Options() with
+        {
+            ClaudeExecutable = FakeCliReplaying("success.ndjson", exitCode: 0, appendLine: "this is not json"),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        var observer = new RecordingObserver();
+
+        // The invocation still fails loudly at process exit, exactly as without an observer.
+        await Assert.ThrowsAsync<StreamParseException>(
+            () => new ClaudeCodeExecutor().ExecuteAsync(options, Paths(), observer));
+
+        Assert.Equal(FixtureLines("success.ndjson").Length, observer.Events.Count);
+        Assert.DoesNotContain(observer.Events, e => e.RawLine.Contains("not json"));
+    }
+
+    private sealed class RecordingObserver : IClaudeStreamObserver
+    {
+        public List<ClaudeStreamEvent> Events { get; } = [];
+
+        public void OnStreamEvent(ClaudeStreamEvent streamEvent) => Events.Add(streamEvent);
+    }
+
+    private sealed class ThrowingObserver : IClaudeStreamObserver
+    {
+        public int Calls { get; private set; }
+
+        public void OnStreamEvent(ClaudeStreamEvent streamEvent)
+        {
+            Calls++;
+            throw new InvalidOperationException("observer boom");
+        }
     }
 
     [Fact]

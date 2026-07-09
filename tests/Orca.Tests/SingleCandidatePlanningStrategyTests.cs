@@ -334,7 +334,8 @@ public sealed class SingleCandidatePlanningStrategyTests : IDisposable
             _script.Enqueue((result, sideEffect));
 
         public Task<ClaudeExecutionResult> ExecuteAsync(
-            ClaudeInvocationOptions options, RunLogPaths logPaths, CancellationToken cancellationToken = default)
+            ClaudeInvocationOptions options, RunLogPaths logPaths,
+            IClaudeStreamObserver? observer = null, CancellationToken cancellationToken = default)
         {
             Invocations.Add((options, logPaths));
             if (_script.Count == 0)
