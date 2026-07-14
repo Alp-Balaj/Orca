@@ -15,6 +15,7 @@ Orca is a workflow, not an autonomous agent. The full spec is `docs/kickoff-v2.m
 | --- | --- | --- |
 | Claude Code CLI | **2.1.201** | the stream-json event contract is derived empirically from committed transcript fixtures; a trait-gated contract test fails loudly on CLI breaking changes |
 | .NET SDK | 10.0.301 | `net10.0`, nullable + implicit usings, warnings as errors, central package management |
+| Terminal.Gui | **2.4.17** | the TUI framework, `Orca.Cli` only (never `Orca.Core`); v2's API and driver model still move between minors, so pin here and upgrade deliberately — the same discipline as the CLI pin, with the shell kept thin so churn touches presentation only |
 
 ## Layout
 

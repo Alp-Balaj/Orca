@@ -1,4 +1,6 @@
+using Orca.Cli;
 using Orca.Cli.Commands;
+using Orca.Cli.Tui;
 using Orca.Core.Config;
 using Orca.Core.Execution;
 using Orca.Core.Git;
@@ -22,10 +24,19 @@ app.Configure(config =>
         .WithDescription("Run one checkpoint (one scoped claude invocation), then stop for your approve/reject decision.");
     config.AddCommand<StatusCommand>("status")
         .WithDescription("Show the plan's checkpoints and the current run state.");
+    config.AddCommand<UiCommand>("ui")
+        .WithDescription("Open the full-screen, read-only status TUI (also opened by bare `orca` on an interactive terminal).");
 });
 
 try
 {
+    // Entry semantics (§3.6 / decision 3): bare `orca` on an interactive terminal opens the
+    // TUI, checked BEFORE Spectre dispatch. On a non-interactive terminal bare `orca` falls
+    // through to Spectre and prints today's help byte-for-byte (scripts see no difference).
+    // The interactivity probe is step 3's ConsoleInteractivity — not a second TTY check.
+    if (args.Length == 0 && ConsoleInteractivity.Detect())
+        return TuiEntry.Run(repoPath: null);
+
     return await app.RunAsync(args);
 }
 catch (Exception e) when (e is ConfigException or VaultException or GitException

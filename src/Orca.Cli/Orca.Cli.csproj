@@ -10,6 +10,7 @@
     <ProjectReference Include="..\Orca.Core\Orca.Core.csproj" />
     <PackageReference Include="Spectre.Console" />
     <PackageReference Include="Spectre.Console.Cli" />
+    <PackageReference Include="Terminal.Gui" />
   </ItemGroup>
 
   <!-- The step-3 non-TTY fix lives in this project (the Spectre gate + the two commands'
