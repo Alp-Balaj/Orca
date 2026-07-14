@@ -6,50 +6,64 @@ using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 using Attribute = Terminal.Gui.Drawing.Attribute;
 
-// Terminal.Gui 2.4.17 ships the legacy static `Application` (Invoke/RequestStop) and
-// `TextView` marked [Obsolete] — "the legacy static Application object is going away" — but
-// both are present and functional, and the static Application.Invoke/AddTimeout marshaling
-// primitive is exactly what decision 1 approved for this feature (§1). We implement that
-// approved contract as written and suppress the deprecation here; migrating off the static
-// Application (and off TextView) is a separate, owner-facing decision flagged in the step-4
-// summary, not a step-4 redesign.
+// Terminal.Gui 2.4.17 ships the legacy static `Application` (Invoke/RequestStop) marked
+// [Obsolete] — "the legacy static Application object is going away" — but it is present and
+// functional, and the static Application.Invoke/AddTimeout marshaling primitive is exactly
+// what decision 1 approved for this feature (§1). We implement that approved contract as
+// written and suppress the deprecation here; migrating off the static Application is a
+// separate, owner-facing decision flagged in the step-4 summary, not a redesign.
 #pragma warning disable CS0618
 
 namespace Orca.Cli.Tui;
 
-/// <summary>The read-only TUI shell (build-order step 4): the four-region window over a
-/// <see cref="StatusReport"/> — the plans/checkpoints tree (left), the detail pane
-/// (right-top), the idle activity pane (right-bottom), and the status line (bottom) —
-/// with navigate / refresh / quit and nothing else. It starts nothing and decides nothing.
+/// <summary>The read-only TUI shell (build-order step 4): a Claude Code-styled window over
+/// a <see cref="StatusReport"/> — brand header, the plans/checkpoints tree (left), the
+/// detail pane (right-top), the idle activity pane (right-bottom), and the status + hint
+/// lines (bottom) — with navigate / refresh / quit and nothing else. It starts nothing and
+/// decides nothing.
 ///
 /// Kept deliberately thin so Terminal.Gui minor-version churn touches presentation only:
 /// every projection (the node tree, the pane text, the status line) is the pure
-/// <see cref="TuiTreeModel"/> / <see cref="TuiText"/> code this merely renders.</summary>
+/// <see cref="TuiTreeModel"/> / <see cref="TuiText"/> code this merely renders, and every
+/// colour comes from <see cref="TuiTheme"/>.</summary>
 internal sealed class MainScreen : Window
 {
     private readonly Func<StatusReport> _rebuild;
     private readonly TreeView<TuiTreeNode> _tree;
-    private readonly TextView _detail;
-    private readonly TextView _activity;
-    private readonly Label _statusLine;
+    private readonly StyledView _detail;
+    private readonly StyledView _activity;
+    private readonly StyledView _statusLine;
     private StatusReport _report;
 
     public MainScreen(StatusReport report, Func<StatusReport> rebuild)
     {
         _report = report;
         _rebuild = rebuild;
-        Title = "Orca";
 
-        // Left: the tree, inside a framed region. Two rows are reserved at the very bottom
-        // for the status line and the key hints, hence Dim.Fill() - 2.
-        var left = new FrameView
-        {
-            Title = "plans (vault)",
-            X = 0,
-            Y = 0,
-            Width = Dim.Percent(40),
-            Height = Dim.Fill() - 2,
-        };
+        // The window is a full-bleed canvas, not a box: no outer border, no title bar,
+        // one column of breathing room at each side — the Claude Code page, not a dialog.
+        Title = string.Empty;
+        BorderStyle = LineStyle.None;
+        SetScheme(TuiTheme.BaseScheme);
+        Padding!.Thickness = new Thickness(1, 0, 1, 0);
+
+        // Brand header, Claude Code's opening line: coral asterisk, bold name, dim purpose.
+        var header = new StyledView { X = 0, Y = 0, Width = Dim.Fill(), Height = 1, CanFocus = false };
+        header.SetLines(
+        [
+            StyledLine.Of(
+                new("✻ ", TuiRole.Accent),
+                new("Orca", TuiRole.Heading),
+                new("  plans · checkpoints · evidence", TuiRole.Faint)),
+        ]);
+
+        // Left: the plans/checkpoints tree.
+        var plansPane = MakePane("plans");
+        plansPane.X = 0;
+        plansPane.Y = 2;
+        plansPane.Width = Dim.Percent(32);
+        plansPane.Height = Dim.Fill(2);
+
         _tree = new TreeView<TuiTreeNode>
         {
             X = 0,
@@ -59,79 +73,82 @@ internal sealed class MainScreen : Window
             // Children selector + can-expand predicate — generic over depth, no hardcoded
             // two levels, so a future roadmap→epic level nests without a tree redesign.
             TreeBuilder = new DelegateTreeBuilder<TuiTreeNode>(n => n.Children, n => n.Children.Count > 0),
+            AllowLetterBasedNavigation = false,
         };
-        _tree.AspectGetter = node => node.Label;
-        _tree.ColorGetter = node => SchemeFor(node.Status)!;
-        left.Add(_tree);
+        _tree.Style.ShowBranchLines = false;
+        _tree.Style.ExpandableSymbol = new System.Text.Rune('▸');
+        _tree.Style.CollapseableSymbol = new System.Text.Rune('▾');
+        // One space between the ▸/▾ fold symbol and the plan id; checkpoints (no fold
+        // symbol) carry their own glyph in the label.
+        _tree.AspectGetter = node => node.Kind == TuiNodeKind.Plan ? " " + node.Label : node.Label;
+        _tree.ColorGetter = SchemeFor;
+        _tree.SetScheme(NodeScheme(TuiTheme.Text));
+        plansPane.Add(_tree);
 
-        // Right column: detail over activity.
-        var detailFrame = new FrameView
-        {
-            Title = "detail",
-            X = Pos.Right(left),
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Percent(55),
-        };
-        _detail = new TextView
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-            ReadOnly = true,
-            WordWrap = true,
-        };
-        detailFrame.Add(_detail);
+        // Right column: detail over activity, one gap column from the tree.
+        var detailPane = MakePane("detail");
+        detailPane.X = Pos.Right(plansPane) + 1;
+        detailPane.Y = 2;
+        detailPane.Width = Dim.Fill();
+        detailPane.Height = Dim.Percent(55);
 
-        var activityFrame = new FrameView
-        {
-            Title = "activity",
-            X = Pos.Right(left),
-            Y = Pos.Bottom(detailFrame),
-            Width = Dim.Fill(),
-            Height = Dim.Fill() - 2,
-        };
-        _activity = new TextView
-        {
-            X = 0,
-            Y = 0,
-            Width = Dim.Fill(),
-            Height = Dim.Fill(),
-            ReadOnly = true,
-            WordWrap = true,
-        };
-        activityFrame.Add(_activity);
+        _detail = new StyledView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        detailPane.Add(_detail);
 
-        // Bottom two rows: the status line, then the key-hint line. Plain labels rather than
-        // a StatusBar so no navigation key (Tab / arrows) is ever intercepted from the tree.
-        _statusLine = new Label { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Height = 1 };
-        var hints = new Label
-        {
-            X = 0,
-            Y = Pos.AnchorEnd(1),
-            Width = Dim.Fill(),
-            Height = 1,
-            Text = "Tab focus · ↑↓ navigate · ←/→ expand · r refresh · q quit",
-        };
+        var activityPane = MakePane("activity");
+        activityPane.X = Pos.Right(plansPane) + 1;
+        activityPane.Y = Pos.Bottom(detailPane);
+        activityPane.Width = Dim.Fill();
+        activityPane.Height = Dim.Fill(2);
 
-        Add(left, detailFrame, activityFrame, _statusLine, hints);
+        _activity = new StyledView { X = 0, Y = 0, Width = Dim.Fill(), Height = Dim.Fill() };
+        activityPane.Add(_activity);
 
-        // Dim the selection highlight from the default near-white to a light grey. Set on the
-        // tree's own scheme so it covers every row — including pending nodes, whose per-node
-        // colour getter returns null and would otherwise keep the bright default focus.
-        var baseScheme = _tree.GetScheme();
-        _tree.SetScheme(new Scheme(baseScheme)
-        {
-            Focus = new Attribute(Color.Black, Color.Gray, baseScheme.Focus.Style),
-            HotFocus = new Attribute(Color.Black, Color.Gray, baseScheme.HotFocus.Style),
-        });
+        // Bottom two rows, Claude Code's footer: the context line, then the faint key
+        // hints. Plain views rather than a StatusBar so no navigation key (Tab / arrows)
+        // is ever intercepted from the tree.
+        _statusLine = new StyledView { X = 0, Y = Pos.AnchorEnd(2), Width = Dim.Fill(), Height = 1, CanFocus = false };
+        var hints = new StyledView { X = 0, Y = Pos.AnchorEnd(1), Width = Dim.Fill(), Height = 1, CanFocus = false };
+        hints.SetLines([TuiText.Hints()]);
+
+        Add(header, plansPane, detailPane, activityPane, _statusLine, hints);
 
         _tree.SelectionChanged += (_, e) => UpdateSelection(e.NewValue);
         KeyDown += OnKey;
 
         LoadReport(report, previousSelection: null);
         _tree.SetFocus();
+    }
+
+    /// <summary>One bordered region: rounded, quiet grey chrome that turns coral while the
+    /// pane owns focus — the "active thing gets the accent border" cue Claude Code's
+    /// dialogs use, and the visible answer to "where am I" for a first-time user. The
+    /// title is our own label over the top border line (<c>╭─ plans ──</c>) rather than
+    /// the stock <c>┤plans├</c> tab decoration.</summary>
+    private static View MakePane(string title)
+    {
+        var pane = new View
+        {
+            BorderStyle = LineStyle.Rounded,
+            CanFocus = true,
+        };
+        pane.SetScheme(TuiTheme.BaseScheme);
+        pane.Padding!.Thickness = new Thickness(1, 0, 1, 0);
+
+        var borderView = pane.Border!.GetOrCreateView();
+        borderView.SetScheme(TuiTheme.BorderIdle);
+        var titleLabel = new Label { X = 2, Y = 0, Text = $" {title} " };
+        titleLabel.SetScheme(TuiTheme.BorderIdle);
+        borderView.Add(titleLabel);
+
+        pane.HasFocusChanged += (_, _) =>
+        {
+            var scheme = pane.HasFocus ? TuiTheme.BorderFocused : TuiTheme.BorderIdle;
+            borderView.SetScheme(scheme);
+            titleLabel.SetScheme(scheme);
+            pane.SetNeedsDraw();
+        };
+        return pane;
     }
 
     /// <summary>Rebuild the tree from a (possibly fresh) report, preserving the selection by
@@ -147,10 +164,12 @@ internal sealed class MainScreen : Window
             _tree.Expand(root);
 
         var selection = FindByIdentity(roots, previousSelection) ?? roots.FirstOrDefault();
+        _tree.ScrollOffsetVertical = 0;
         if (selection is not null)
         {
             _tree.SelectedObject = selection;
-            _tree.GoTo(selection);
+            if (!ReferenceEquals(selection, roots[0]))
+                _tree.EnsureVisible(selection);
         }
 
         UpdateSelection(selection);
@@ -164,9 +183,9 @@ internal sealed class MainScreen : Window
 
     private void UpdateSelection(TuiTreeNode? node)
     {
-        _detail.Text = node is null ? "No plans in the vault." : TuiText.Detail(node);
-        _activity.Text = node is null ? "" : TuiText.Activity(node);
-        _statusLine.Text = TuiText.StatusLine(_report, node);
+        _detail.SetLines(node is null ? TuiText.EmptyVault() : TuiText.Detail(node));
+        _activity.SetLines(node is null ? [] : TuiText.Activity(node));
+        _statusLine.SetLines([TuiText.StatusLine(_report, node)]);
     }
 
     private void OnKey(object? sender, Key key)
@@ -183,36 +202,37 @@ internal sealed class MainScreen : Window
         }
     }
 
-    /// <summary>Per-node colour, using the same status categories the tree glyphs encode.
-    /// Returns null for pending nodes, which the tree renders in its default scheme.
-    ///
-    /// Only the FOREGROUND is recoloured — each role's background and style are copied from
-    /// the tree's resolved scheme, so a coloured row stays readable text on the normal
-    /// background (and keeps the focus highlight) instead of a solid block of colour.</summary>
-    private Scheme? SchemeFor(TuiNodeStatus status)
+    /// <summary>Per-node colour in the tree, from the same status categories the glyphs
+    /// encode: green done, red failed, yellow active, dim pending (plans stay in the
+    /// default colour while pending — they are the primary items). The run state's current
+    /// checkpoint gets the coral accent, outranking its status. Selection keeps the node's
+    /// colour over a warm dark highlight.</summary>
+    private Scheme SchemeFor(TuiTreeNode node)
     {
-        Color? foreground = status switch
+        var foreground = node switch
         {
-            TuiNodeStatus.Complete => Color.Green,
-            TuiNodeStatus.Failed => Color.Red,
-            TuiNodeStatus.InProgress => Color.Yellow,
-            _ => null,
+            { IsCurrent: true } => TuiTheme.Accent,
+            { Status: TuiNodeStatus.Complete } => TuiTheme.Success,
+            { Status: TuiNodeStatus.Failed } => TuiTheme.Error,
+            { Status: TuiNodeStatus.InProgress } => TuiTheme.Warning,
+            { Kind: TuiNodeKind.Plan } => TuiTheme.Text,
+            _ => TuiTheme.Dim,
         };
-        if (foreground is not { } fg)
-            return null;
-
-        var baseScheme = _tree.GetScheme();
-        return new Scheme(baseScheme)
-        {
-            Normal = Recolor(baseScheme.Normal, fg),
-            Focus = Recolor(baseScheme.Focus, fg),
-            HotNormal = Recolor(baseScheme.HotNormal, fg),
-            HotFocus = Recolor(baseScheme.HotFocus, fg),
-        };
+        return NodeScheme(foreground);
     }
 
-    private static Attribute Recolor(Attribute attribute, Color foreground) =>
-        new(foreground, attribute.Background, attribute.Style);
+    private static Scheme NodeScheme(Color foreground)
+    {
+        var normal = new Attribute(foreground, TuiTheme.Background);
+        var selected = new Attribute(foreground, TuiTheme.SelectionBg, TextStyle.Bold);
+        return new Scheme(TuiTheme.BaseScheme)
+        {
+            Normal = normal,
+            HotNormal = normal,
+            Focus = selected,
+            HotFocus = selected,
+        };
+    }
 
     private static TuiTreeNode? FindByIdentity(IReadOnlyList<TuiTreeNode> roots, NodeIdentity? identity)
     {

@@ -18,8 +18,23 @@ public sealed class TuiTreeModelTests
 
         var roots = TuiTreeModel.Build(report);
 
-        Assert.Equal(["alpha", "beta"], roots.Select(n => n.Label));
+        Assert.Equal(["alpha", "beta"], roots.Select(n => n.Label)); // no checkpoints — no count suffix
         Assert.All(roots, n => Assert.Equal(TuiNodeKind.Plan, n.Kind));
+    }
+
+    [Fact]
+    public void Plan_label_carries_an_at_a_glance_completion_count()
+    {
+        var plan = TuiTestData.MakePlan("alpha", PlanStatus.InProgress,
+        [
+            TuiTestData.MakeCheckpoint("01-a", CheckpointStatus.Complete),
+            TuiTestData.MakeCheckpoint("02-b", CheckpointStatus.InProgress),
+            TuiTestData.MakeCheckpoint("03-c", CheckpointStatus.Pending),
+        ]);
+
+        var root = Assert.Single(TuiTreeModel.Build(TuiTestData.MakeReport(true, TuiTestData.MakeEntry(plan))));
+
+        Assert.Equal("alpha (1/3)", root.Label);
     }
 
     [Fact]
@@ -57,6 +72,7 @@ public sealed class TuiTreeModelTests
 
         Assert.Equal(["✓ 01-a", "· 02-b"], root.Children.Select(c => c.Label));
         Assert.All(root.Children, c => Assert.Equal(TuiNodeKind.Checkpoint, c.Kind));
+        Assert.All(root.Children, c => Assert.False(c.IsCurrent));
         Assert.All(root.Children, c => Assert.Empty(c.Children)); // recursion bottoms out — depth, not two hardcoded levels
         Assert.Same(entry, root.Children[0].Plan);
         Assert.Equal("01-a", root.Children[0].Checkpoint!.Id);
@@ -66,19 +82,21 @@ public sealed class TuiTreeModelTests
     }
 
     [Fact]
-    public void Run_states_current_checkpoint_is_marked_with_an_arrow_overriding_the_status_glyph()
+    public void Run_states_current_checkpoint_gets_the_active_dot_and_the_IsCurrent_flag()
     {
         var plan = TuiTestData.MakePlan("alpha", PlanStatus.InProgress,
         [
             TuiTestData.MakeCheckpoint("01-a", CheckpointStatus.Complete),
-            TuiTestData.MakeCheckpoint("02-b", CheckpointStatus.InProgress),
+            TuiTestData.MakeCheckpoint("02-b", CheckpointStatus.Pending),
         ]);
         var entry = TuiTestData.MakeEntry(plan, TuiTestData.MakeRunState("alpha", "02-b"));
 
         var root = Assert.Single(TuiTreeModel.Build(TuiTestData.MakeReport(true, entry)));
 
         Assert.Equal("✓ 01-a", root.Children[0].Label);
-        Assert.Equal("→ 02-b", root.Children[1].Label); // current wins over the in_progress glyph
+        Assert.Equal("⏺ 02-b", root.Children[1].Label); // current wins over the pending glyph
+        Assert.False(root.Children[0].IsCurrent);
+        Assert.True(root.Children[1].IsCurrent); // drives the accent colour in the shell
     }
 
     // Expected is passed as the enum name (a string) so the public test signature does not
@@ -108,10 +126,10 @@ public sealed class TuiTreeModelTests
     [InlineData(CheckpointStatus.Rejected, false, "✗")]
     [InlineData(CheckpointStatus.Blocked, false, "✗")]
     [InlineData(CheckpointStatus.Pending, false, "·")]
-    [InlineData(CheckpointStatus.InProgress, false, "·")]
-    [InlineData(CheckpointStatus.AwaitingReview, false, "·")]
-    [InlineData(CheckpointStatus.Complete, true, "→")]
-    [InlineData(CheckpointStatus.Pending, true, "→")]
+    [InlineData(CheckpointStatus.InProgress, false, "⏺")]
+    [InlineData(CheckpointStatus.AwaitingReview, false, "⏺")]
+    [InlineData(CheckpointStatus.Complete, true, "⏺")]
+    [InlineData(CheckpointStatus.Pending, true, "⏺")]
     public void Glyph_marks_current_first_then_status(CheckpointStatus status, bool isCurrent, string expected)
         => Assert.Equal(expected, TuiTreeModel.CheckpointGlyph(status, isCurrent));
 }

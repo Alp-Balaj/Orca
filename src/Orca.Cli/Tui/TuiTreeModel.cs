@@ -6,8 +6,9 @@ namespace Orca.Cli.Tui;
 /// <summary>Pure projection of a <see cref="StatusReport"/> into the TUI tree's node model.
 /// No Terminal.Gui types: the whole plan→checkpoint tree, its status colours, and its
 /// glyphs are built and unit-tested here, and the shell (<c>MainScreen</c>) only renders
-/// the result. The status→colour mapping and the current-checkpoint <c>→</c> marker match
-/// <c>StatusCommand</c> exactly.</summary>
+/// the result. The status→colour mapping matches <c>StatusCommand</c>; the glyphs speak
+/// the Claude Code status-dot language: <c>✓</c> done, <c>✗</c> failed, <c>⏺</c> active,
+/// <c>·</c> pending.</summary>
 internal static class TuiTreeModel
 {
     /// <summary>Roots of the tree — one per plan in the report, in report order. Each plan
@@ -29,6 +30,7 @@ internal static class TuiTreeModel
                     Label = $"{CheckpointGlyph(checkpoint.Status, isCurrent)} {checkpoint.Id}",
                     Kind = TuiNodeKind.Checkpoint,
                     Status = MapCheckpointStatus(checkpoint.Status),
+                    IsCurrent = isCurrent,
                     Children = [],
                     Plan = entry,
                     Checkpoint = checkpoint,
@@ -38,7 +40,7 @@ internal static class TuiTreeModel
 
             roots.Add(new TuiTreeNode
             {
-                Label = entry.Plan.PlanId,
+                Label = PlanLabel(entry.Plan),
                 Kind = TuiNodeKind.Plan,
                 Status = MapPlanStatus(entry.Plan.Status),
                 Children = children,
@@ -47,6 +49,16 @@ internal static class TuiTreeModel
         }
 
         return roots;
+    }
+
+    /// <summary>Plan row text: the id plus an at-a-glance completion count —
+    /// e.g. <c>recipe-api (2/4)</c>. A plan with no checkpoints is just its id.</summary>
+    public static string PlanLabel(Plan plan)
+    {
+        if (plan.Checkpoints.Count == 0)
+            return plan.PlanId;
+        var done = plan.Checkpoints.Count(c => c.Status == CheckpointStatus.Complete);
+        return $"{plan.PlanId} ({done}/{plan.Checkpoints.Count})";
     }
 
     /// <summary>The exact checkpoint status→colour mapping <c>StatusCommand</c> uses:
@@ -70,17 +82,19 @@ internal static class TuiTreeModel
         _ => TuiNodeStatus.Pending,
     };
 
-    /// <summary>The leading glyph. The run state's current checkpoint is marked <c>→</c>
-    /// exactly as the CLI marks it, overriding the status glyph; otherwise <c>✓</c>
-    /// complete, <c>✗</c> rejected/blocked, <c>·</c> everything else.</summary>
+    /// <summary>The leading glyph, in Claude Code's status-dot language. The run state's
+    /// current checkpoint gets the active dot <c>⏺</c> (rendered in the accent colour) —
+    /// it outranks the status glyph; then <c>✓</c> complete, <c>✗</c> rejected/blocked,
+    /// <c>⏺</c> in progress / awaiting review, <c>·</c> pending.</summary>
     public static string CheckpointGlyph(CheckpointStatus status, bool isCurrent)
     {
         if (isCurrent)
-            return "→";
+            return "⏺";
         return status switch
         {
             CheckpointStatus.Complete => "✓",
             CheckpointStatus.Rejected or CheckpointStatus.Blocked => "✗",
+            CheckpointStatus.InProgress or CheckpointStatus.AwaitingReview => "⏺",
             _ => "·",
         };
     }

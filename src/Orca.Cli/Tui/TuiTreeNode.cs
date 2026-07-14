@@ -31,13 +31,17 @@ internal enum TuiNodeStatus
 /// checkpoints".</summary>
 internal sealed record TuiTreeNode
 {
-    /// <summary>Display text, glyph included (e.g. "→ 03-verifier-loop").</summary>
+    /// <summary>Display text, glyph included (e.g. "⏺ 03-verifier-loop").</summary>
     public required string Label { get; init; }
 
     public required TuiNodeKind Kind { get; init; }
 
     /// <summary>Drives the node's colour via the tree's colour getter.</summary>
     public required TuiNodeStatus Status { get; init; }
+
+    /// <summary>True for the checkpoint the plan's run state points at — the accent-coloured
+    /// "work happens here" row, overriding the status colour.</summary>
+    public bool IsCurrent { get; init; }
 
     public required IReadOnlyList<TuiTreeNode> Children { get; init; }
 
