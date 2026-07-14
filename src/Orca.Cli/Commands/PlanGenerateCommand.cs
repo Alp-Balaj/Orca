@@ -61,7 +61,7 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings)
     {
-        if (!RouteStrategyToHuman(settings.Strategy))
+        if (!RouteStrategyToHuman(settings.Strategy, ConsoleInteractivity.Detect()))
             return 1;
 
         var workspace = GitWorkspace.Discover(settings.Repo ?? Directory.GetCurrentDirectory());
@@ -102,17 +102,34 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
     }
 
     /// <summary>Single vs multi is a human decision (spec §8). An explicit flag is that
-    /// decision already made; otherwise ask. Multi-candidate is deferred until the
+    /// decision already made; otherwise ask. On a non-interactive terminal (§3.6) there is
+    /// no one to ask and deliberation depth is never defaulted, so refuse up front — one
+    /// line, nonzero exit, before any invocation and before any quota is spent — rather
+    /// than crashing at the selection prompt. Multi-candidate is deferred until the
     /// implementer loop is proven end to end — choosing it refuses clearly rather than
     /// silently downgrading.</summary>
-    private static bool RouteStrategyToHuman(string? strategyFlag)
+    internal static bool RouteStrategyToHuman(string? strategyFlag, bool interactive)
     {
-        var choice = strategyFlag ?? (AnsiConsole.Prompt(new SelectionPrompt<string>()
-            .Title("How much deliberation does this plan deserve? Your call — Orca never decides this.")
-            .AddChoices(
-                "single — one generation call (routine work following existing patterns)",
-                "multi — N candidates + critic (architecturally significant; not built yet)"))
-            is { } picked && picked.StartsWith("multi", StringComparison.Ordinal) ? "multi" : "single");
+        string choice;
+        if (strategyFlag is not null)
+        {
+            choice = strategyFlag;
+        }
+        else if (!interactive)
+        {
+            AnsiConsole.MarkupLine(
+                "[red]--strategy is required on a non-interactive terminal.[/] How much deliberation a plan deserves (single vs multi) is a human decision and is never defaulted (spec §8). Re-run with [bold]--strategy single[/].");
+            return false;
+        }
+        else
+        {
+            choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
+                .Title("How much deliberation does this plan deserve? Your call — Orca never decides this.")
+                .AddChoices(
+                    "single — one generation call (routine work following existing patterns)",
+                    "multi — N candidates + critic (architecturally significant; not built yet)"))
+                .StartsWith("multi", StringComparison.Ordinal) ? "multi" : "single";
+        }
 
         if (choice == "multi")
         {

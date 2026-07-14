@@ -5,10 +5,22 @@ namespace Orca.Cli.Commands;
 
 /// <summary>Today's AnsiConsole prompts behind the ICheckpointGate seam (§3.3). Renders
 /// each decision moment exactly as CheckpointRunCommand did inline, then asks the same
-/// prompts — on a non-interactive terminal the prompts still crash exactly as before
-/// (the auto-defer/exit-2 fix is build-order step 3; nothing here ever sets
-/// AutoDeferred).</summary>
-internal sealed class SpectreCheckpointGate : ICheckpointGate
+/// prompts.
+///
+/// On a non-interactive terminal (§3.6) there is no human to answer and Spectre's prompts
+/// would throw <em>after</em> the pipeline already spent quota. Instead this gate takes
+/// the safe, resumable path the existing machinery already recovers for free — without
+/// touching AnsiConsole:
+/// <list type="bullet">
+/// <item><c>DecideAsync</c> auto-defers (<c>Defer</c> with <c>AutoDeferred = true</c>) — the
+///   one place the CLI lane ever sets that flag; the command maps it to exit 2.</item>
+/// <item><c>ConfirmDiscardAfterFailureAsync</c> declines — partial changes are never
+///   discarded without a human (§8 decision 6).</item>
+/// <item><c>ConfirmVerifyPendingAsync</c> declines — no quota is spent unattended
+///   (§8 decision 6).</item>
+/// </list>
+/// On an interactive terminal every method behaves byte-for-byte as before.</summary>
+internal sealed class SpectreCheckpointGate(bool interactive) : ICheckpointGate
 {
     /// <summary>True once ConfirmDiscardAfterFailureAsync has rendered the failure
     /// evidence (invocation result + changes), so the command doesn't render it a
@@ -17,6 +29,11 @@ internal sealed class SpectreCheckpointGate : ICheckpointGate
 
     public Task<bool> ConfirmDiscardAfterFailureAsync(CheckpointDecisionContext context, CancellationToken ct)
     {
+        // §8 decision 6: on a non-interactive terminal, never discard partial changes —
+        // leave everything in the deferred/resumable state, render nothing.
+        if (!interactive)
+            return Task.FromResult(false);
+
         CheckpointRenderer.RenderExecution(context.Run!);
         CheckpointRenderer.RenderInvocationFailedLine();
         RenderedInvocationFailure = true;
@@ -26,12 +43,28 @@ internal sealed class SpectreCheckpointGate : ICheckpointGate
             { DefaultValue = false }));
     }
 
-    public Task<bool> ConfirmVerifyPendingAsync(int pendingAttempt, CancellationToken ct) =>
-        Task.FromResult(AnsiConsole.Prompt(new ConfirmationPrompt(
+    public Task<bool> ConfirmVerifyPendingAsync(int pendingAttempt, CancellationToken ct)
+    {
+        // §8 decision 6: no quota is spent unattended — decline verification on a
+        // non-interactive terminal and fall through to the auto-defer.
+        if (!interactive)
+            return Task.FromResult(false);
+
+        return Task.FromResult(AnsiConsole.Prompt(new ConfirmationPrompt(
             $"Attempt {pendingAttempt} has not been verified — run gates + reconcile + verify now?")));
+    }
 
     public Task<CheckpointDecision> DecideAsync(CheckpointDecisionContext context, CancellationToken ct)
     {
+        // §3.6: no human to answer — auto-defer into the resumable state (the command maps
+        // AutoDeferred to exit 2). This is the one place the CLI lane sets AutoDeferred.
+        if (!interactive)
+            return Task.FromResult(new CheckpointDecision
+            {
+                Choice = CheckpointChoice.Defer,
+                AutoDeferred = true,
+            });
+
         if (context.Run is { } run)
             CheckpointRenderer.RenderExecution(run);
         if (context.Verification is { } verification)

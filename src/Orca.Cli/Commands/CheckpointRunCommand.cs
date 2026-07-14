@@ -53,12 +53,12 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
             AnsiConsole.MarkupLine(
                 $"[yellow]attempt {preview.Attempt - 1} is still awaiting your decision[/] — reviewing it now instead of launching a new invocation.");
 
-        var gate = new SpectreCheckpointGate();
+        var gate = new SpectreCheckpointGate(ConsoleInteractivity.Detect());
         var result = await session.ExecuteAsync(preview, gate);
         return Render(result, gate);
     }
 
-    private static int Render(CheckpointSessionResult result, SpectreCheckpointGate gate)
+    internal static int Render(CheckpointSessionResult result, SpectreCheckpointGate gate)
     {
         switch (result.Outcome)
         {
@@ -106,6 +106,16 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
                 return 0;
 
             case CheckpointSessionOutcome.Deferred:
+                // Auto-defer on a non-interactive terminal exits 2 ("ran, needs a human" —
+                // §3.6); a human's deliberate defer stays 0. Everything is already in the
+                // resumable state; an interactive re-run picks the decision back up free.
+                if (result.AutoDeferred)
+                {
+                    AnsiConsole.MarkupLine(
+                        "[yellow]auto-deferred[/] — this terminal is non-interactive, so the checkpoint ran and its decision is waiting. Re-run checkpoint-run from a real terminal to approve/reject/defer (nothing is re-paid).");
+                    return 2;
+                }
+
                 AnsiConsole.MarkupLine("[yellow]deferred[/] — re-run checkpoint-run to pick this decision back up.");
                 return 0;
 

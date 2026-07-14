@@ -17,6 +17,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Orca.Core\Orca.Core.csproj" />
+    <!-- Step 3's non-TTY fix (auto-defer gate, exit-2 mapping, plan-generate refusal)
+         lives in Orca.Cli; these tests exercise those seams directly. -->
+    <ProjectReference Include="..\..\src\Orca.Cli\Orca.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

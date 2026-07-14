@@ -12,6 +12,12 @@
     <PackageReference Include="Spectre.Console.Cli" />
   </ItemGroup>
 
+  <!-- The step-3 non-TTY fix lives in this project (the Spectre gate + the two commands'
+       exit/refusal mapping); its unit tests reach these internal seams from Orca.Tests. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orca.Tests" />
+  </ItemGroup>
+
   <!-- Version = 1.0.<commit count>, plus -dirty when tracked files have uncommitted
        changes, so every commit packs a distinguishable .nupkg and `dotnet tool list` can
        answer "is this the build I think it is". Must run as a target (not a static
