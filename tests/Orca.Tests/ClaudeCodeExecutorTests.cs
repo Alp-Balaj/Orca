@@ -52,6 +52,36 @@ public class ClaudeCodeExecutorTests : IDisposable
             .Where(line => !string.IsNullOrWhiteSpace(line))
             .ToArray();
 
+    /// <summary>A fake CLI that proves what actually crossed the process boundary: it
+    /// dumps its own argv to <paramref name="argvCapture"/> and copies stdin verbatim to
+    /// <paramref name="stdinCapture"/> before replaying the fixture, exactly like
+    /// <see cref="FakeCliReplaying"/> otherwise.</summary>
+    private string FakeCliCapturingStdin(string stdinCapture, string argvCapture, string fixtureName, int exitCode)
+    {
+        var fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Transcripts", fixtureName);
+        if (OperatingSystem.IsWindows())
+        {
+            var cmd = Path.Combine(_dir, "fake-claude-stdin.cmd");
+            File.WriteAllText(cmd,
+                "@echo off\r\n" +
+                $"echo %* > \"{argvCapture}\"\r\n" +
+                $"more > \"{stdinCapture}\"\r\n" +
+                $"type \"{fixture}\"\r\n" +
+                $"exit /b {exitCode}\r\n");
+            return cmd;
+        }
+
+        var sh = Path.Combine(_dir, "fake-claude-stdin.sh");
+        File.WriteAllText(sh,
+            "#!/bin/sh\n" +
+            $"printf '%s' \"$*\" > \"{argvCapture}\"\n" +
+            $"cat > \"{stdinCapture}\"\n" +
+            $"cat \"{fixture}\"\n" +
+            $"exit {exitCode}\n");
+        File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return sh;
+    }
+
     [Fact]
     public async Task Auth_failure_replay_is_classified_and_logged_distinctly()
     {
@@ -92,6 +122,84 @@ public class ClaudeCodeExecutorTests : IDisposable
 
         var log = File.ReadAllLines(paths.EventLog);
         Assert.Contains(log, l => l.Contains("\"process_exit\"") && l.Contains("\"stop_reason\":\"succeeded\""));
+    }
+
+    [Fact]
+    public async Task Prompt_arrives_over_stdin_intact_while_argv_never_carries_it()
+    {
+        var stdinCapture = Path.Combine(_dir, "stdin-capture.txt");
+        var argvCapture = Path.Combine(_dir, "argv-capture.txt");
+        var options = Options() with
+        {
+            ClaudeExecutable = FakeCliCapturingStdin(stdinCapture, argvCapture, "success.ndjson", exitCode: 0),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, Paths());
+
+        Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
+        Assert.Equal(options.Prompt, File.ReadAllText(stdinCapture));
+        Assert.DoesNotContain(options.Prompt, File.ReadAllText(argvCapture));
+    }
+
+    [Fact]
+    public async Task Child_exiting_before_reading_stdin_does_not_crash_the_executor()
+    {
+        // Larger than any OS pipe buffer, so the write blocks until the fake CLI — which
+        // never touches stdin — exits and closes its end, guaranteeing a broken-pipe
+        // IOException rather than racing to see if the whole prompt fit in the buffer.
+        var options = Options() with
+        {
+            Prompt = new string('a', 300_000),
+            ClaudeExecutable = FakeCliReplaying("success.ndjson", exitCode: 0),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        var paths = Paths();
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, paths);
+
+        Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
+
+        var log = File.ReadAllLines(paths.EventLog);
+        Assert.Contains(log, l => l.Contains("\"orca_executor\"") && l.Contains("\"stdin_write_failed\""));
+    }
+
+    [Fact]
+    public async Task Refuses_an_oversized_prompt_before_touching_the_executable_or_the_run_log()
+    {
+        var promptBytes = ClaudeCodeExecutor.MaxPromptBytes + 1;
+        var options = Options() with
+        {
+            Prompt = new string('a', promptBytes),
+            // Nonexistent path: if the guard didn't fire first, this would fail with a
+            // different, later message ("does not exist"), proving ordering by contrast.
+            ClaudeExecutable = Path.Combine(_dir, "no-such-claude"),
+        };
+        var paths = Paths();
+
+        var e = await Assert.ThrowsAsync<ExecutorException>(
+            () => new ClaudeCodeExecutor().ExecuteAsync(options, paths));
+
+        Assert.Contains(promptBytes.ToString(), e.Message);
+        Assert.Contains(ClaudeCodeExecutor.MaxPromptBytes.ToString(), e.Message);
+        Assert.False(File.Exists(paths.EventLog));
+    }
+
+    [Fact]
+    public async Task Process_start_failure_is_wrapped_never_a_raw_Win32Exception()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        var fakeExe = Path.Combine(_dir, "not-executable");
+        File.WriteAllText(fakeExe, "#!/bin/sh\necho hi\n");
+        File.SetUnixFileMode(fakeExe, UnixFileMode.UserRead | UnixFileMode.UserWrite); // no execute bit
+        var options = Options() with { ClaudeExecutable = fakeExe };
+
+        var e = await Assert.ThrowsAsync<ExecutorException>(
+            () => new ClaudeCodeExecutor().ExecuteAsync(options, Paths()));
+
+        Assert.Contains(fakeExe, e.Message);
     }
 
     [ClaudeCliFact]

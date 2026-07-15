@@ -8,7 +8,11 @@ namespace Orca.Core.Execution;
 /// the capture command the stream contract was derived from (see the transcript
 /// fixtures): <c>--safe-mode</c> (not <c>--bare</c>, which cannot authenticate from a
 /// subscription), <c>stream-json</c>, and the empirically still-mandatory
-/// <c>--verbose</c>.</summary>
+/// <c>--verbose</c>.
+/// <para>The prompt itself never appears here: <c>-p</c> takes its value from stdin (see
+/// <see cref="ClaudeCodeExecutor"/>), not from an argv element — argv is visible to every
+/// other process on the machine via <c>/proc/&lt;pid&gt;/cmdline</c> or <c>ps</c>, stdin is
+/// not.</para></summary>
 public static class ClaudeArguments
 {
     public static IReadOnlyList<string> Build(ClaudeInvocationOptions options)
@@ -32,7 +36,6 @@ public static class ClaudeArguments
         {
             "--safe-mode",
             "-p",
-            options.Prompt,
         };
 
         if (options.AllowedTools.Count > 0)

@@ -92,6 +92,7 @@ internal static class TuiTestData
             PendingDecision = pendingDecision,
             Prompt = "Implement the checkpoint.\nSecond line.",
             PromptSha256 = "abcdef0123456789",
+            PromptBytes = 38,
             Options = new ClaudeInvocationOptions
             {
                 Prompt = "Implement the checkpoint.",

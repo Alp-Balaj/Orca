@@ -22,7 +22,6 @@ public class ClaudeArgumentsTests
         [
             "--safe-mode",
             "-p",
-            "Read the file README.md and summarize it in one sentence",
             "--allowedTools",
             "Read",
             "--output-format",
@@ -31,6 +30,15 @@ public class ClaudeArgumentsTests
             "--max-turns",
             "12",
         ], argv);
+    }
+
+    [Fact]
+    public void Prompt_never_appears_in_the_produced_argv()
+    {
+        var options = Options();
+        var argv = ClaudeArguments.Build(options);
+
+        Assert.DoesNotContain(options.Prompt, argv);
     }
 
     [Fact]

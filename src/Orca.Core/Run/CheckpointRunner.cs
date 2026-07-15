@@ -1,3 +1,4 @@
+using System.Text;
 using Orca.Core.Config;
 using Orca.Core.Domain;
 using Orca.Core.Execution;
@@ -28,6 +29,12 @@ public sealed record CheckpointRunPreview
 
     public required string Prompt { get; init; }
     public required string PromptSha256 { get; init; }
+
+    /// <summary>UTF-8 byte length of <see cref="Prompt"/> — the same figure the executor's
+    /// stdin size guard (<see cref="ClaudeCodeExecutor.MaxPromptBytes"/>) checks against,
+    /// surfaced here so <c>--dry-run</c> and the TUI preview can show it before spending.</summary>
+    public required int PromptBytes { get; init; }
+
     public required ClaudeInvocationOptions Options { get; init; }
     public required IReadOnlyList<string> Argv { get; init; }
     public required string? SettingsJson { get; init; }
@@ -170,6 +177,7 @@ public sealed class CheckpointRunner(
             PendingDecision = pendingDecision,
             Prompt = prompt,
             PromptSha256 = CheckpointPrompt.Sha256(prompt),
+            PromptBytes = Encoding.UTF8.GetByteCount(prompt),
             Options = options,
             Argv = ClaudeArguments.Build(options),
             SettingsJson = settingsJson,

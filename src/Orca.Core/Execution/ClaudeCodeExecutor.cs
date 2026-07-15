@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using Orca.Core.Domain;
 
 namespace Orca.Core.Execution;
@@ -14,6 +16,14 @@ namespace Orca.Core.Execution;
 /// logged-out fixture).</para></summary>
 public sealed class ClaudeCodeExecutor : IClaudeExecutor
 {
+    /// <summary>Pre-flight ceiling on prompt size, enforced once at this choke point
+    /// before any process is spawned or run-log file created. Prompts now travel over
+    /// stdin (never argv), so there is no OS argv-length limit to lean on as a backstop;
+    /// 512 KiB is generous headroom over any real assembled prompt (a handful of KB of
+    /// plan/checkpoint/feedback text) while still catching a runaway prompt — e.g. an
+    /// accidentally embedded transcript — before it reaches the child process.</summary>
+    public const int MaxPromptBytes = 512 * 1024;
+
     public async Task<ClaudeExecutionResult> ExecuteAsync(
         ClaudeInvocationOptions options,
         RunLogPaths logPaths,
@@ -21,6 +31,11 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
         CancellationToken cancellationToken = default)
     {
         var argv = ClaudeArguments.Build(options);
+
+        var promptBytes = Encoding.UTF8.GetByteCount(options.Prompt);
+        if (promptBytes > MaxPromptBytes)
+            throw new ExecutorException(
+                $"prompt is {promptBytes} bytes, exceeding the {MaxPromptBytes}-byte stdin delivery ceiling");
 
         var executable = options.ClaudeExecutable ?? ClaudeExecutableResolver.Resolve()
             ?? throw new ExecutorException(
@@ -45,11 +60,40 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             startInfo.ArgumentList.Add(argument);
 
         var stopwatch = Stopwatch.StartNew();
-        using var process = Process.Start(startInfo)
-            ?? throw new ExecutorException($"failed to start claude process: {executable}");
+        using var process = StartProcess(startInfo, executable);
 
-        // 2.1.201 stalls ~3s waiting on stdin in -p mode; close it at launch.
-        process.StandardInput.Close();
+        // The prompt rides stdin, then stdin is closed so the CLI sees EOF — write-then-
+        // close, same anti-stall discipline the old immediate close gave (2.1.201 stalls
+        // ~3s waiting on stdin in -p mode). Run on its own task so a large prompt can't
+        // deadlock against a child that fills its stdout pipe before it drains stdin. A
+        // child that exits before reading (broken pipe) must not crash the executor —
+        // caught, recorded, and normal exit handling proceeds.
+        var stdinTask = Task.Run(async () =>
+        {
+            try
+            {
+                await process.StandardInput.WriteAsync(options.Prompt);
+                await process.StandardInput.FlushAsync();
+            }
+            catch (IOException e)
+            {
+                runLog.WriteExecutorEvent("stdin_write_failed", new Dictionary<string, object?>
+                {
+                    ["message"] = e.Message,
+                });
+            }
+            finally
+            {
+                try
+                {
+                    process.StandardInput.Close();
+                }
+                catch (IOException)
+                {
+                    // Already broken on the far end; nothing left to close.
+                }
+            }
+        }, CancellationToken.None);
 
         string? sessionId = null;
         ClaudeResultSummary? result = null;
@@ -143,6 +187,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
         }
 
         // Both pumps end at EOF once the process (and its descendants' pipe handles) are gone.
+        await stdinTask;
         await stdoutTask;
         await stderrTask;
         stopwatch.Stop();
@@ -187,6 +232,23 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
         }
 
         return execution;
+    }
+
+    /// <summary>Wraps <see cref="Process.Start(ProcessStartInfo)"/> so a launch failure
+    /// (missing executable, no exec permission, malformed binary) never leaks a raw
+    /// <see cref="Win32Exception"/> to callers — always an <see cref="ExecutorException"/>
+    /// naming the executable and the OS-reported reason.</summary>
+    private static Process StartProcess(ProcessStartInfo startInfo, string executable)
+    {
+        try
+        {
+            return Process.Start(startInfo)
+                ?? throw new ExecutorException($"failed to start claude process: {executable}");
+        }
+        catch (Win32Exception e)
+        {
+            throw new ExecutorException($"failed to start claude process '{executable}': {e.Message}", e);
+        }
     }
 }
 

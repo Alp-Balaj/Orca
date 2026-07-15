@@ -86,4 +86,34 @@ public class ClaudeCliContractTests : IDisposable
         Assert.Equal(result.Result.TotalCostUsd, state.AccumulatedCostUsd);
         Assert.Equal(result.Result.Usage, state.LastUsage);
     }
+
+    /// <summary>The real CLI, not a fake, receiving the prompt exclusively over stdin
+    /// (<see cref="ClaudeArguments.Build"/> puts no prompt element in argv) in
+    /// <c>-p --output-format stream-json</c> mode. A CLI version that silently regressed
+    /// to expecting the prompt as an argv element would show up here as a hang past the
+    /// timeout or an <c>authentication_failed</c>-shaped no-op, not as a compile error.</summary>
+    [ClaudeCliFact]
+    public async Task Stdin_delivered_prompt_is_accepted_in_stream_json_mode()
+    {
+        File.WriteAllText(
+            Path.Combine(_dir, "README.md"),
+            "Orca is a .NET 10 CLI tool that orchestrates Claude Code as a checkpoint-gated implementer.\n");
+        var paths = new RunLogLayout(_dir).AttemptPaths("orca-build", "04-claude-code-executor", 1);
+        var options = new ClaudeInvocationOptions
+        {
+            Prompt = "Read the file README.md and summarize it in one sentence",
+            WorkingDirectory = _dir,
+            AllowedTools = ["Read"],
+            MaxTurns = 8,
+            Timeout = TimeSpan.FromMinutes(3),
+        };
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, paths);
+
+        Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
+        Assert.Equal(0, result.ExitCode);
+        Assert.NotNull(result.Result);
+        Assert.False(result.Result.IsError);
+        Assert.True(result.Result.TotalCostUsd > 0m, "expected a positive USD-equivalent cost — proves the CLI actually processed the stdin-delivered prompt rather than erroring out immediately");
+    }
 }
