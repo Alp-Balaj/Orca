@@ -1,3 +1,4 @@
+using Orca.Core.Execution;
 using Orca.Core.Domain;
 using Orca.Core.Run;
 
@@ -72,6 +73,80 @@ internal static class TuiTestData
                 verdict == VerificationVerdict.Pass ? SemanticVerdict.Pass : SemanticVerdict.Fail,
                 verdict == VerificationVerdict.Pass ? null : "not yet")],
             verdict, "Body.\n");
+
+    public static CheckpointRunPreview MakePreview(
+        string planId = "alpha", string checkpointId = "01-a", int attempt = 1,
+        bool pendingDecision = false, string? settingsJson = null)
+    {
+        var checkpoint = MakeCheckpoint(checkpointId, CheckpointStatus.InProgress, "Add the endpoint");
+        var plan = MakePlan(planId, PlanStatus.InProgress, [checkpoint]);
+        return new CheckpointRunPreview
+        {
+            Plan = plan,
+            Checkpoint = checkpoint,
+            CheckpointIndex = 0,
+            Attempt = attempt,
+            Branch = $"orca/{planId}/{checkpointId}",
+            BranchExists = false,
+            PendingDecision = pendingDecision,
+            Prompt = "Implement the checkpoint.\nSecond line.",
+            PromptSha256 = "abcdef0123456789",
+            Options = new ClaudeInvocationOptions
+            {
+                Prompt = "Implement the checkpoint.",
+                WorkingDirectory = "/repo",
+                AllowedTools = ["Read", "Write", "Edit"],
+                MaxTurns = 60,
+                Timeout = TimeSpan.FromMinutes(30),
+                Model = null,
+                MaxBudgetUsd = 5m,
+            },
+            Argv = ["claude", "-p", "--safe-mode", "--output-format", "stream-json"],
+            SettingsJson = settingsJson,
+            LogPaths = new RunLogPaths { EventLog = ".orca/runs/events.ndjson", Stderr = ".orca/runs/stderr.log" },
+        };
+    }
+
+    public static ClaudeExecutionResult MakeExecution(
+        decimal cost = 0.5m, int turns = 12, long durationMs = 63_000,
+        bool error = false, ExecutionOutcome outcome = ExecutionOutcome.Completed)
+        => new()
+        {
+            Outcome = outcome,
+            ExitCode = error ? 1 : 0,
+            SessionId = "sess-1",
+            Result = outcome == ExecutionOutcome.TimedOut ? null : new ClaudeResultSummary
+            {
+                Subtype = error ? "error_during_execution" : "success",
+                IsError = error,
+                SessionId = "sess-1",
+                NumTurns = turns,
+                DurationMs = durationMs,
+                TotalCostUsd = cost,
+                Usage = new TokenUsage
+                {
+                    InputTokens = 10,
+                    OutputTokens = 20,
+                    CacheCreationInputTokens = 0,
+                    CacheReadInputTokens = 0,
+                },
+                ResultText = error ? "Not logged in · Please run /login" : null,
+            },
+            Elapsed = TimeSpan.FromMilliseconds(durationMs),
+        };
+
+    public static GateCommandResult MakeGate(
+        string gate, int exitCode = 0, double seconds = 3.2, bool timedOut = false)
+        => new()
+        {
+            Gate = gate,
+            Command = ["dotnet", gate == "build" ? "build" : "test"],
+            ExitCode = exitCode,
+            TimedOut = timedOut,
+            OutputPath = $".orca/runs/{gate}.log",
+            OutputTail = "…",
+            Elapsed = TimeSpan.FromSeconds(seconds),
+        };
 
     public static ReconciliationRecord Reconciliation(
         string planId, string checkpointId, int attempt,

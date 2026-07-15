@@ -52,7 +52,7 @@ internal static class TuiEntry
         Application.Init();
         try
         {
-            Application.Run(new MainScreen(report, Build));
+            Application.Run(new MainScreen(report, Build, config, workspace));
         }
         finally
         {

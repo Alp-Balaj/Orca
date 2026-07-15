@@ -22,11 +22,17 @@ internal sealed class StyledView : View
         KeyDown += OnScrollKey;
     }
 
-    public void SetLines(IReadOnlyList<StyledLine> lines)
+    public void SetLines(IReadOnlyList<StyledLine> lines) => SetLines(lines, scrollToEnd: false);
+
+    /// <summary>Replace the content; <paramref name="scrollToEnd"/> follows the tail (the
+    /// live-log idiom — the run screen appends lifecycle lines and wants the newest
+    /// visible). int.MaxValue is clamped to the last page by <see cref="OnDrawingContent"/>;
+    /// the scroll keys still let the reader page back up afterwards.</summary>
+    public void SetLines(IReadOnlyList<StyledLine> lines, bool scrollToEnd)
     {
         _lines = lines;
         _wrapWidth = -1;
-        _scroll = 0;
+        _scroll = scrollToEnd ? int.MaxValue : 0;
         SetNeedsDraw();
     }
 

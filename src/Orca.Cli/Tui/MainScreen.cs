@@ -1,3 +1,6 @@
+using Orca.Core.Config;
+using Orca.Core.Execution;
+using Orca.Core.Git;
 using Orca.Core.Run;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
@@ -29,16 +32,20 @@ namespace Orca.Cli.Tui;
 internal sealed class MainScreen : Window
 {
     private readonly Func<StatusReport> _rebuild;
+    private readonly OrcaConfig _config;
+    private readonly GitWorkspace _workspace;
     private readonly TreeView<TuiTreeNode> _tree;
     private readonly StyledView _detail;
     private readonly StyledView _activity;
     private readonly StyledView _statusLine;
     private StatusReport _report;
 
-    public MainScreen(StatusReport report, Func<StatusReport> rebuild)
+    public MainScreen(StatusReport report, Func<StatusReport> rebuild, OrcaConfig config, GitWorkspace workspace)
     {
         _report = report;
         _rebuild = rebuild;
+        _config = config;
+        _workspace = workspace;
 
         // The window is a full-bleed canvas, not a box: no outer border, no title bar,
         // one column of breathing room at each side — the Claude Code page, not a dialog.
@@ -200,6 +207,55 @@ internal sealed class MainScreen : Window
             Refresh();
             key.Handled = true;
         }
+        else if (key == Key.X)
+        {
+            RunSelectedCheckpoint();
+            key.Handled = true;
+        }
+    }
+
+    /// <summary>The run action (build-order step 5): on a selected checkpoint, prepare the
+    /// run (read-only), render the preview modal — the authorize-the-spend moment — and, if
+    /// the human authorizes, drive one <see cref="CheckpointRunSession"/> to its decision in
+    /// the full-screen <see cref="RunScreen"/>. On return the report is rebuilt and the
+    /// shell refreshes with the selection preserved. Nothing spends before Run is pressed;
+    /// a preview Cancel spends nothing.</summary>
+    private void RunSelectedCheckpoint()
+    {
+        if (_tree.SelectedObject is not { Kind: TuiNodeKind.Checkpoint } node)
+            return; // x on a plan node (or empty vault) is a no-op this step.
+
+        var session = new CheckpointRunSession(_config, _workspace, new ClaudeCodeExecutor());
+
+        CheckpointRunPreview preview;
+        try
+        {
+            // Read-only: resolves plan/checkpoint, attempt, branch, prompt, argv. Throws
+            // (never guesses) when the state won't allow a run — surfaced in a modal rather
+            // than crashing the shell. PendingDecision = true is legal here: the same
+            // preview → ExecuteAsync path resumes it (the session branches internally).
+            preview = session.Prepare(node.Plan.Plan.PlanId, node.Checkpoint!.Id);
+        }
+        catch (Exception e)
+        {
+            TuiModal.Ask("cannot run this checkpoint",
+                [StyledLine.Of(new("● ", TuiRole.Error), new(e.Message, TuiRole.Text))],
+                new TuiModal.Choice<bool>(Key.Enter, "enter back", false),
+                new TuiModal.Choice<bool>(Key.Esc, "esc back", false));
+            return;
+        }
+
+        var authorized = TuiModal.Ask("preview — authorize the run", RunPreviewText.Describe(preview),
+            new TuiModal.Choice<bool>(Key.Enter, "enter run (spends quota)", true),
+            new TuiModal.Choice<bool>(Key.Esc, "esc cancel (spends nothing)", false));
+        if (!authorized)
+            return;
+
+        RunScreen.Run(session, preview);
+
+        // Session over — the workflow stops (no auto-advance): rebuild and refresh, keeping
+        // the selection so the just-run checkpoint stays put with its updated evidence.
+        Refresh();
     }
 
     /// <summary>Per-node colour in the tree, from the same status categories the glyphs
