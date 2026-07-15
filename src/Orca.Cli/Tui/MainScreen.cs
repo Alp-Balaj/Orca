@@ -288,12 +288,16 @@ internal sealed class MainScreen : Window
         Refresh();
     }
 
-    /// <summary>The run action (build-order step 5): on a selected checkpoint, prepare the
-    /// run (read-only), render the preview modal — the authorize-the-spend moment — and, if
-    /// the human authorizes, drive one <see cref="CheckpointRunSession"/> to its decision in
-    /// the full-screen <see cref="RunScreen"/>. On return the report is rebuilt and the
-    /// shell refreshes with the selection preserved. Nothing spends before Run is pressed;
-    /// a preview Cancel spends nothing.</summary>
+    /// <summary>The run/approve action (build-order step 5): on a selected checkpoint,
+    /// prepare the run (read-only). A fresh attempt renders the preview modal — the
+    /// authorize-the-spend moment — and only proceeds if the human authorizes; a preview
+    /// Cancel spends nothing. A checkpoint already awaiting a decision
+    /// (<see cref="CheckpointRunPreview.PendingDecision"/>) has nothing new to authorize —
+    /// resuming it launches no invocation, so it skips straight to the decision, exactly as
+    /// <c>checkpoint-run</c> already does on the CLI (<c>CheckpointRunCommand</c> has no
+    /// confirm step either; only the pending-decision notice). Either way, the session then
+    /// runs to its decision in the full-screen <see cref="RunScreen"/>. On return the report
+    /// is rebuilt and the shell refreshes with the selection preserved.</summary>
     private void RunSelectedCheckpoint()
     {
         if (_tree.SelectedObject is not { Kind: TuiNodeKind.Checkpoint } node)
@@ -319,11 +323,14 @@ internal sealed class MainScreen : Window
             return;
         }
 
-        var authorized = TuiModal.Ask("preview — authorize the run", RunPreviewText.Describe(preview),
-            new TuiModal.Choice<bool>(Key.Enter, "enter run (spends quota)", true),
-            new TuiModal.Choice<bool>(Key.Esc, "esc cancel (spends nothing)", false));
-        if (!authorized)
-            return;
+        if (!preview.PendingDecision)
+        {
+            var authorized = TuiModal.Ask("preview — authorize the run", RunPreviewText.Describe(preview),
+                new TuiModal.Choice<bool>(Key.Enter, "enter run (spends quota)", true),
+                new TuiModal.Choice<bool>(Key.Esc, "esc cancel (spends nothing)", false));
+            if (!authorized)
+                return;
+        }
 
         RunScreen.Run(session, preview);
 
