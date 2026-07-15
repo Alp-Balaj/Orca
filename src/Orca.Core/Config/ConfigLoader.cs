@@ -29,7 +29,7 @@ public static class ConfigLoader
 
         var repoPath = Path.Combine(Path.GetFullPath(targetRepoRoot), RepoFileName);
         if (!File.Exists(repoPath))
-            throw new ConfigException(
+            throw new MissingRepoConfigException(
                 $"no {RepoFileName} found at {repoPath} — is this the target repo root? (spec §3: {RepoFileName} is committed at the target repo's root)");
 
         globalConfigPath ??= GlobalConfigPath();

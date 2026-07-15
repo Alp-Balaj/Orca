@@ -149,8 +149,21 @@ repo can remove:
 
 ### Per-repository setup
 
-Commit an `orca.json` at the target repo's root. Minimal working shape (this is the
-config the e2e run used, trimmed):
+Fastest path: from the repo root, run
+
+    orca init
+
+It scaffolds a schema-valid `orca.json` — vault name resolved from your global config
+(you pick when several are defined; `--vault <name>` to choose non-interactively),
+`plansDir` defaulted to `<RepoName>/Plans`, and `commands.build`/`commands.test` detected
+from a top-level `.slnx`/`.sln`/`.csproj`/`package.json` (a `REPLACE_ME` placeholder when
+nothing matches). It then **stops** and asks you to review the commands and `vault.plansDir`
+and commit the file yourself — `init` never `git add`s or commits, and it refuses to
+clobber an existing `orca.json` unless you pass `--force`. Running any command in a repo
+with no `orca.json` fails loud and points you at `orca init`.
+
+To write the file by hand instead, commit an `orca.json` at the target repo's root.
+Minimal working shape (this is the config the e2e run used, trimmed):
 
     {
       "schemaVersion": 1,

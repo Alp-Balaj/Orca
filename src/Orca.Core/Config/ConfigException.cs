@@ -15,3 +15,14 @@ public class ConfigException : Exception
     {
     }
 }
+
+/// <summary>The target repo has no committed <c>orca.json</c> at its root. A distinct
+/// subtype (not a message string-match) so the CLI can append its own onboarding hint —
+/// "run 'orca init' to scaffold one." — without Core ever knowing CLI command names.</summary>
+public sealed class MissingRepoConfigException : ConfigException
+{
+    public MissingRepoConfigException(string message)
+        : base(message)
+    {
+    }
+}

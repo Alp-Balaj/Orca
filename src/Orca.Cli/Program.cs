@@ -41,6 +41,14 @@ try
 
     return await app.RunAsync(args);
 }
+catch (MissingRepoConfigException e)
+{
+    // The one refusal with a concrete next step: no orca.json here. Point the way
+    // forward. Core stays free of CLI vocabulary — the command name lives only here.
+    AnsiConsole.MarkupLine(
+        $"[red]error:[/] {e.Message.EscapeMarkup()} — run 'orca init' to scaffold one.");
+    return 1;
+}
 catch (Exception e) when (e is ConfigException or VaultException or GitException
     or ExecutorException or CheckpointRunException or PlanningException or ArgumentException)
 {

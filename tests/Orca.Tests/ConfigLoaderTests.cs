@@ -156,7 +156,11 @@ public sealed class ConfigLoaderTests : IDisposable
         var repo = Path.Combine(_root, "empty-repo");
         Directory.CreateDirectory(repo);
 
-        var e = Assert.Throws<ConfigException>(() => ConfigLoader.Load(repo, GlobalWithVault()));
+        // MissingRepoConfigException, not a plain ConfigException: the CLI catches this
+        // subtype to append "run 'orca init' to scaffold one." without Core knowing the
+        // command name. It stays a ConfigException so the general catch still covers it.
+        var e = Assert.Throws<MissingRepoConfigException>(() => ConfigLoader.Load(repo, GlobalWithVault()));
+        Assert.IsAssignableFrom<ConfigException>(e);
         Assert.Contains("orca.json", e.Message);
         Assert.Contains(repo, e.Message);
     }
