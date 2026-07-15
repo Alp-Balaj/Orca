@@ -56,11 +56,11 @@ public sealed class VaultReader(VaultLayout layout)
         return [.. records.OrderBy(r => r.Attempt)];
     }
 
-    public int NextAttemptNumber(string planId, string checkpointId)
-    {
-        var records = ReadVerificationRecords(planId, checkpointId);
-        return records.Count == 0 ? 1 : records[^1].Attempt + 1;
-    }
+    /// <summary>One past the highest attempt evidenced by either record kind — see
+    /// <see cref="VaultAttempts"/>.</summary>
+    public int NextAttemptNumber(string planId, string checkpointId) => VaultAttempts.NextAttempt(
+        ReadVerificationRecords(planId, checkpointId),
+        ReadReconciliationRecords(planId, checkpointId));
 
     /// <summary>All reconciliation records for a checkpoint, ordered by attempt. Only
     /// Orca-validated files ever land in <c>reconciliation/</c> (raw role output stays in

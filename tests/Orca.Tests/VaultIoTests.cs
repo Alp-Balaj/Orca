@@ -77,6 +77,17 @@ public sealed class VaultIoTests : IDisposable
         Verdict: VerificationVerdict.Fail,
         Body: "Failing tests: TagRepositoryTests.Unique_index_is_enforced.\n");
 
+    private static ReconciliationRecord FullReconciliationRecord(int attempt) => new(
+        SchemaVersion: 1,
+        PlanId: "recipe-tagging",
+        PlanVersion: 1,
+        CheckpointId: "01-tag-entity",
+        Attempt: attempt,
+        ImplementsPlan: ReconciliationVerdict.Full,
+        Missing: [],
+        Extra: [],
+        Body: "Implements the plan.\n");
+
     [Fact]
     public void Reads_a_plan_from_a_nested_plans_directory()
     {
@@ -157,6 +168,33 @@ public sealed class VaultIoTests : IDisposable
             VerificationRecordSerializer.Serialize(record),
             VerificationRecordSerializer.Serialize(restored));
         Assert.Equal(2, reader.NextAttemptNumber("recipe-tagging", "01-tag-entity"));
+    }
+
+    [Fact]
+    public void NextAttemptNumber_considers_reconciliation_records_when_verification_is_absent()
+    {
+        var layout = Layout();
+        var writer = new VaultWriter(layout);
+        var reader = new VaultReader(layout);
+
+        writer.WriteReconciliationRecord(FullReconciliationRecord(attempt: 1));
+
+        Assert.Empty(reader.ReadVerificationRecords("recipe-tagging", "01-tag-entity"));
+        Assert.Equal(2, reader.NextAttemptNumber("recipe-tagging", "01-tag-entity"));
+    }
+
+    [Fact]
+    public void NextAttemptNumber_takes_the_higher_of_verification_and_reconciliation()
+    {
+        var layout = Layout();
+        var writer = new VaultWriter(layout);
+        var reader = new VaultReader(layout);
+
+        writer.WriteVerificationRecord(FailedGatesRecord(attempt: 1));
+        writer.WriteReconciliationRecord(FullReconciliationRecord(attempt: 1));
+        writer.WriteReconciliationRecord(FullReconciliationRecord(attempt: 2));
+
+        Assert.Equal(3, reader.NextAttemptNumber("recipe-tagging", "01-tag-entity"));
     }
 
     [Fact]

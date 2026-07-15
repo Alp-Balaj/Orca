@@ -379,14 +379,9 @@ public sealed class CheckpointVerifier(
     /// <summary>First invocation number ≥ <paramref name="minimum"/> whose event log does
     /// not exist yet — run logs are append-only evidence, so a crashed invocation's
     /// leftover log is skipped past, never overwritten.</summary>
-    private int NextFreeInvocation(AttemptIdentity identity, string roleKey, int minimum)
-    {
-        var invocation = minimum;
-        while (File.Exists(_logLayout.RoleAttemptPaths(
-                   identity.PlanId, identity.CheckpointId, identity.Attempt, roleKey, invocation).EventLog))
-            invocation++;
-        return invocation;
-    }
+    private int NextFreeInvocation(AttemptIdentity identity, string roleKey, int minimum) =>
+        NextFreeSequence.Find(minimum, invocation => File.Exists(_logLayout.RoleAttemptPaths(
+            identity.PlanId, identity.CheckpointId, identity.Attempt, roleKey, invocation).EventLog));
 
     private string VaultRelative(string path) =>
         Path.GetRelativePath(config.VaultRoot, path).Replace('\\', '/');
