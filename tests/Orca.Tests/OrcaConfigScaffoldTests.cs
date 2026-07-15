@@ -214,15 +214,15 @@ public sealed class OrcaConfigScaffoldTests : IDisposable
     }
 
     [Fact]
-    public void PlansDir_preparation_creates_the_Orca_and_repo_folders_but_not_the_Plans_leaf()
+    public void PlansDir_preparation_creates_the_full_folder_structure()
     {
         var vault = MakeVaultWith();
 
         OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
 
+        Assert.True(Directory.Exists(Path.Combine(vault, "Orca")));
         Assert.True(Directory.Exists(Path.Combine(vault, "Orca", "MyApp")));
-        // The leaf is created lazily on first write, like the rest of the vault-writing code.
-        Assert.False(Directory.Exists(Path.Combine(vault, "Orca", "MyApp", "Plans")));
+        Assert.True(Directory.Exists(Path.Combine(vault, "Orca", "MyApp", "Plans")));
     }
 
     [Fact]

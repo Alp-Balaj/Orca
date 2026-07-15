@@ -141,22 +141,16 @@ public static class OrcaConfigScaffold
 
     /// <summary>Resolves <c>vault.plansDir</c> to its one canonical location,
     /// <c>Orca/&lt;repoName&gt;/Plans</c>, and — when the vault root exists on this machine — creates the
-    /// <c>Orca/</c> and <c>Orca/&lt;repoName&gt;/</c> folders under it, so a place for the plans is
-    /// waiting the moment the human commits <c>orca.json</c> (owner decision 2026-07-15: one fixed
-    /// path, never a walk of the vault for a folder that happens to share the repo's name). The
-    /// <c>Plans</c> leaf is deliberately <em>not</em> pre-created: like the rest of the vault-writing
-    /// code (<see cref="Orca.Core.Vault.VaultWriter"/> / <see cref="Orca.Core.Vault.PlanScaffold"/>) it
-    /// comes into being the first time a plan is written under it. This is the only method here that
-    /// writes to disk, and it keeps <see cref="DetectPlansDir"/>'s fail-never posture: a vault root
-    /// that is absent on this machine creates nothing (mirroring the old fallback trigger), and an
-    /// <see cref="UnauthorizedAccessException"/>/<see cref="IOException"/> creating the folder degrades
-    /// to returning the path string with nothing created rather than crashing <c>orca init</c> — the
-    /// leaf-less directory would have been created lazily anyway. Creation is idempotent:
-    /// <see cref="Directory.CreateDirectory(string)"/> is a no-op when the folder is already there. The
-    /// caller only reaches this when no <c>--plans-dir</c> was given; an explicit flag is trusted and
-    /// written straight through, so nothing is ever created when the human named their own location.
-    /// plansDir is always spelled with forward slashes — <see cref="Orca.Core.Vault.VaultLayout"/>
-    /// re-splits it on them.</summary>
+    /// <c>Orca/</c>, <c>Orca/&lt;repoName&gt;/</c>, and <c>Orca/&lt;repoName&gt;/Plans</c> folders under it
+    /// (owner decision 2026-07-15: one fixed path, never a walk of the vault for a folder that happens to share
+    /// the repo's name). This is the only method here that writes to disk, and it keeps <see cref="DetectPlansDir"/>'s
+    /// fail-never posture: a vault root that is absent on this machine creates nothing (mirroring the old fallback
+    /// trigger), and an <see cref="UnauthorizedAccessException"/>/<see cref="IOException"/> creating the folder
+    /// degrades to returning the path string with nothing created rather than crashing <c>orca init</c>. Creation is
+    /// idempotent: <see cref="Directory.CreateDirectory(string)"/> is a no-op when the folder is already there. The
+    /// caller only reaches this when no <c>--plans-dir</c> was given; an explicit flag is trusted and written
+    /// straight through, so nothing is ever created when the human named their own location. plansDir is always
+    /// spelled with forward slashes — <see cref="Orca.Core.Vault.VaultLayout"/> re-splits it on them.</summary>
     public static PreparedPlansDir DetectPlansDir(string vaultRoot, string repoName)
     {
         if (string.IsNullOrWhiteSpace(repoName))
@@ -174,9 +168,9 @@ public static class OrcaConfigScaffold
 
         try
         {
-            // One call creates both Orca/ and Orca/<repoName>/ (CreateDirectory makes every missing
-            // intermediate) and no-ops when they already exist. The Plans leaf is left to the writer.
-            Directory.CreateDirectory(Path.Combine(vaultRoot, "Orca", repoName));
+            // One call creates Orca/, Orca/<repoName>/, and Orca/<repoName>/Plans/ (CreateDirectory makes every
+            // missing intermediate) and no-ops when they already exist.
+            Directory.CreateDirectory(Path.Combine(vaultRoot, "Orca", repoName, "Plans"));
             return new PreparedPlansDir
             {
                 PlansDir = plansDir,
