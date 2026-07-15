@@ -1,5 +1,6 @@
 using Orca.Core.Execution;
 using Orca.Core.Domain;
+using Orca.Core.Planning;
 using Orca.Core.Run;
 
 namespace Orca.Tests;
@@ -152,4 +153,102 @@ internal static class TuiTestData
         string planId, string checkpointId, int attempt,
         ReconciliationVerdict verdict, IReadOnlyList<string> missing)
         => new(1, planId, 1, checkpointId, attempt, verdict, missing, [], "Body.\n");
+
+    // --- Planning (step 7: the plan-generate screen) ---
+
+    public static PlanningRequest MakePlanningRequest(
+        string planId = "recipe-tagging", string goal = "Add tag CRUD to the API.", string? title = null)
+        => new()
+        {
+            PlanId = planId,
+            Goal = goal,
+            Title = title,
+            TargetRepoName = "RecipeApp",
+            BaseBranch = "main",
+        };
+
+    public static PlanningPreview MakePlanningPreview(
+        string planId = "recipe-tagging", int attempt = 1, string? settingsJson = null, string? model = null)
+        => new()
+        {
+            Request = MakePlanningRequest(planId),
+            Strategy = PlanningStrategyKind.SingleCandidate,
+            PlanFilePath = $"/vault/Plans/{planId}/{planId}.md",
+            RelativePlanPath = $"Plans/{planId}/{planId}.md",
+            Attempt = attempt,
+            MaxParseRetries = 2,
+            PriorState = null,
+            RequestedTimestamp = "2026-07-15T00:00:00Z",
+            Prompt = "Write the plan.\nSecond line.",
+            PromptSha256 = "abcdef0123456789",
+            Options = new ClaudeInvocationOptions
+            {
+                Prompt = "Write the plan.",
+                WorkingDirectory = "/vault",
+                AllowedTools = ["Read", "Write", "Edit"],
+                MaxTurns = 30,
+                Timeout = TimeSpan.FromMinutes(15),
+                Model = model,
+                MaxBudgetUsd = 2m,
+            },
+            Argv = ["claude", "-p", "--safe-mode", "--output-format", "stream-json"],
+            SettingsJson = settingsJson,
+            LogPaths = new RunLogPaths
+            {
+                EventLog = $".orca/runs/{planId}/planning.attempt-{attempt}.events.ndjson",
+                Stderr = ".orca/runs/stderr.log",
+            },
+        };
+
+    public static PlanningAttempt MakePlanningAttempt(
+        int attempt = 1, InvocationStopReason stop = InvocationStopReason.Succeeded,
+        string? parseFailure = null, decimal cost = 0.5m, string? sessionId = "sess-1")
+        => new()
+        {
+            Attempt = attempt,
+            StopReason = stop,
+            ParseFailure = parseFailure,
+            SessionId = sessionId,
+            CostUsd = cost,
+            PromptSha256 = "abc",
+            StartedAt = DateTimeOffset.UnixEpoch,
+            EndedAt = DateTimeOffset.UnixEpoch,
+        };
+
+    public static PlanningState MakePlanningState(
+        string planId, PlanningRunStatus status, params PlanningAttempt[] attempts)
+        => new()
+        {
+            SchemaVersion = 1,
+            PlanId = planId,
+            Strategy = PlanningStrategyKind.SingleCandidate,
+            Status = status,
+            Attempts = attempts,
+            PromptFileHashes = new Dictionary<string, string> { ["planner"] = "hash" },
+            AccumulatedCostUsd = attempts.Sum(a => a.CostUsd),
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            UpdatedAt = DateTimeOffset.UnixEpoch,
+        };
+
+    public static PlanningOutcome MakePlanningOutcome(
+        PlanningRunStatus status, InvocationStopReason stop = InvocationStopReason.Succeeded,
+        string? parseFailure = null, string? failureDetail = null, string planId = "recipe-tagging",
+        ClaudeExecutionResult? execution = null, RateLimitInfo? rateLimit = null)
+    {
+        var attempt = MakePlanningAttempt(1, stop, parseFailure);
+        var state = MakePlanningState(planId, status, attempt);
+        var exec = execution ?? MakeExecution();
+        if (rateLimit is not null)
+            exec = exec with { LastRateLimit = rateLimit };
+        return new PlanningOutcome
+        {
+            State = state,
+            PlanFilePath = $"/vault/Plans/{planId}/{planId}.md",
+            Plan = status == PlanningRunStatus.Succeeded
+                ? MakePlan(planId, PlanStatus.Draft, [MakeCheckpoint("01-a", CheckpointStatus.Pending)])
+                : null,
+            LastExecution = exec,
+            FailureDetail = failureDetail,
+        };
+    }
 }

@@ -54,6 +54,25 @@ internal static class TuiTheme
         Disabled = new Attribute(Faint, Background),
     };
 
+    /// <summary>Editable field fill (step 7's plan-generate form): text over a warm dark
+    /// box so a field reads as fillable rather than blending into the page, lifting to the
+    /// grey border colour while it owns focus (the same "active thing lifts" cue the panes
+    /// use). Set explicitly because the stock v2 field scheme renders grey-on-grey — the
+    /// bug <see cref="StyledView"/> exists to dodge.</summary>
+    public static Scheme Input { get; } = new()
+    {
+        Normal = new Attribute(Text, SelectionBg),
+        Focus = new Attribute(Text, Border),
+        HotNormal = new Attribute(Text, SelectionBg),
+        HotFocus = new Attribute(Text, Border),
+        Active = new Attribute(Text, Border),
+        HotActive = new Attribute(Text, Border),
+        Highlight = new Attribute(Text, Border),
+        Editable = new Attribute(Text, SelectionBg),
+        ReadOnly = new Attribute(Dim, SelectionBg),
+        Disabled = new Attribute(Faint, Background),
+    };
+
     /// <summary>Pane border + title when the pane does not own focus: quiet warm grey.</summary>
     public static Scheme BorderIdle { get; } = DimmedScheme(new Attribute(Border, Background));
 

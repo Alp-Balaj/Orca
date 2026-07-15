@@ -1,6 +1,7 @@
 using Orca.Core.Config;
 using Orca.Core.Execution;
 using Orca.Core.Git;
+using Orca.Core.Planning;
 using Orca.Core.Run;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
@@ -212,6 +213,79 @@ internal sealed class MainScreen : Window
             RunSelectedCheckpoint();
             key.Handled = true;
         }
+        else if (key == Key.G)
+        {
+            GeneratePlan();
+            key.Handled = true;
+        }
+    }
+
+    /// <summary>The plan-generate action (build-order step 7): open the form (item 4a), and on
+    /// a valid submit assemble a <see cref="PlanningRequest"/> exactly as
+    /// <c>PlanGenerateCommand</c> does, render the preview modal (the authorize-the-spend
+    /// moment — cancel spends nothing), run the same <c>OrcaIgnore.EnsureIgnored</c> guard the
+    /// CLI runs (added-the-entry → stop, commit it, re-run; Orca never commits on its own),
+    /// and on authorize drive one gate-less <see cref="SingleCandidatePlanningStrategy"/> run
+    /// through the full-screen <see cref="PlanScreen"/>. On return the report rebuilds and the
+    /// shell refreshes — the freshly drafted plan now appears in the tree. This is a thin front
+    /// end (Prepare → gitignore guard → GenerateAsync); it creates a NEW plan and so is not
+    /// tied to the tree selection, though a selected plan's id pre-fills the form.</summary>
+    private void GeneratePlan()
+    {
+        var prefillPlanId = _tree.SelectedObject?.Plan.Plan.PlanId;
+        if (PlanForm.Show(prefillPlanId) is not { } resolved)
+            return; // cancelled — spends nothing, touches nothing.
+
+        var request = new PlanningRequest
+        {
+            PlanId = resolved.PlanId,
+            Goal = resolved.Goal,
+            Title = resolved.Title,
+            TargetRepoName = Path.GetFileName(_workspace.RepoRoot),
+            BaseBranch = resolved.BaseBranch,
+        };
+
+        var strategy = new SingleCandidatePlanningStrategy(_config, new ClaudeCodeExecutor(), _workspace.RepoRoot);
+
+        PlanningPreview preview;
+        try
+        {
+            // Read-only: resolves attempt, plan path, prompt, argv. Throws (never guesses) when
+            // the state won't allow a run — the "already exists / already succeeded" refusals —
+            // surfaced in a modal rather than crashing the shell.
+            preview = strategy.Prepare(request);
+        }
+        catch (Exception e)
+        {
+            TuiModal.Ask("cannot generate this plan",
+                [StyledLine.Of(new("● ", TuiRole.Error), new(e.Message, TuiRole.Text))],
+                new TuiModal.Choice<bool>(Key.Enter, "enter back", false),
+                new TuiModal.Choice<bool>(Key.Esc, "esc back", false));
+            return;
+        }
+
+        var authorized = TuiModal.Ask("preview — authorize plan generation", PlanPreviewText.Describe(preview),
+            new TuiModal.Choice<bool>(Key.Enter, "enter generate (spends quota)", true),
+            new TuiModal.Choice<bool>(Key.Esc, "esc cancel (spends nothing)", false));
+        if (!authorized)
+            return;
+
+        // The thin front end's gitignore guard (mirrors PlanGenerateCommand): if it just added
+        // the entry, stop before spending — commit that, then re-run.
+        if (OrcaIgnore.EnsureIgnored(_workspace.RepoRoot))
+        {
+            TuiModal.Ask("gitignore updated", PlanOutcomeText.GitignoreAdded(),
+                new TuiModal.Choice<bool>(Key.Enter, "enter back", false),
+                new TuiModal.Choice<bool>(Key.Esc, "esc back", false));
+            Refresh();
+            return;
+        }
+
+        PlanScreen.Run(strategy, preview);
+
+        // Run over — the workflow stops (no auto-advance): rebuild and refresh so the freshly
+        // drafted plan appears in the tree (selection preserved by identity when it survives).
+        Refresh();
     }
 
     /// <summary>The run action (build-order step 5): on a selected checkpoint, prepare the
