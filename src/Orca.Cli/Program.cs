@@ -37,7 +37,7 @@ try
     // through to Spectre and prints today's help byte-for-byte (scripts see no difference).
     // The interactivity probe is step 3's ConsoleInteractivity — not a second TTY check.
     if (args.Length == 0 && ConsoleInteractivity.Detect())
-        return TuiEntry.Run(repoPath: null);
+        return TuiEntry.RunWithOnboarding(repoPath: null);
 
     return await app.RunAsync(args);
 }

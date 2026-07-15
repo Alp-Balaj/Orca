@@ -62,10 +62,22 @@ public sealed class InitCommand : Command<InitCommand.Settings>
                 break;
         }
 
+        return Scaffold(workspace, settings.Vault, settings.PlansDir, interactive);
+    }
+
+    /// <summary>The write-and-stop tail shared by <see cref="Execute"/> and the bare-<c>orca</c>
+    /// / <c>orca ui</c> onboarding offer (plan orca-init, checkpoint 4 — see
+    /// <see cref="Orca.Cli.Tui.TuiEntry"/>): resolve the vault against the global config
+    /// (read-only), detect commands, write the parse-checked scaffold at the repo root, then
+    /// STOP with the review-and-commit guidance. No <c>git add</c>/<c>commit</c>, no
+    /// global-config edit. Don't-clobber is the caller's decision — reaching here means the
+    /// write is meant to happen (the offer only fires when <c>orca.json</c> is absent).</summary>
+    internal static int Scaffold(GitWorkspace workspace, string? requestedVault, string? plansDir, bool interactive)
+    {
         var globalPath = ConfigLoader.GlobalConfigPath();
         var vaultName = ResolveVaultName(
             LoadGlobalVaults(globalPath),
-            settings.Vault,
+            requestedVault,
             interactive,
             globalPath,
             PickVaultInteractively);
@@ -75,10 +87,11 @@ public sealed class InitCommand : Command<InitCommand.Settings>
         {
             VaultName = vaultName,
             RepoName = Path.GetFileName(workspace.RepoRoot),
-            PlansDir = settings.PlansDir,
+            PlansDir = plansDir,
             Commands = detected,
         });
 
+        var repoFile = Path.Combine(workspace.RepoRoot, ConfigLoader.RepoFileName);
         File.WriteAllText(repoFile, json);
 
         AnsiConsole.MarkupLine($"[green]created[/] {repoFile.EscapeMarkup()}");

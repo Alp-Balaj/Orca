@@ -1,6 +1,8 @@
+using Orca.Cli.Commands;
 using Orca.Core.Config;
 using Orca.Core.Git;
 using Orca.Core.Run;
+using Spectre.Console;
 using Terminal.Gui.App;
 
 // Terminal.Gui 2.4.17 marks the legacy static Application (Init/Run/Shutdown) [Obsolete]
@@ -31,8 +33,50 @@ internal static class TuiEntry
             return 1;
         }
 
-        return Run(repoPath);
+        return RunWithOnboarding(repoPath);
     }
+
+    /// <summary>The interactive entry both bare <c>orca</c> and <c>orca ui</c> route through on
+    /// a TTY (each caller has already confirmed interactivity). Opens the read-only TUI over the
+    /// repo's status; but if the repo has no committed <c>orca.json</c> — the one refusal with a
+    /// concrete next step — it OFFERS to scaffold one right here (plan orca-init, checkpoint 4;
+    /// owner decision 2026-07-15: both entry points offer) instead of failing loud through the
+    /// Spectre lane. Every other refusal (non-git dir, unresolvable vault, bad config) still
+    /// throws and surfaces through the CLI boundary's error handling.</summary>
+    public static int RunWithOnboarding(string? repoPath)
+    {
+        try
+        {
+            return Run(repoPath);
+        }
+        catch (MissingRepoConfigException)
+        {
+            return OfferInit(repoPath, Confirm);
+        }
+    }
+
+    /// <summary>No <c>orca.json</c> here and we're on a TTY: offer to scaffold one (default no).
+    /// Decline is a clean choice — a one-line hint, exit 0 (owner decision 2026-07-15), not the
+    /// red missing-config error. Accept runs the same <see cref="InitCommand.Scaffold"/> path,
+    /// which writes the parse-checked file and STOPS with review-and-commit guidance; we do NOT
+    /// open the TUI over the freshly written, unreviewed config (scaffold-then-stop, the whole
+    /// feature's discipline). The confirm is injected so the branch is unit-testable without a
+    /// console — mirroring the injected vault pick in <see cref="InitCommand"/>. This runs
+    /// before <c>Application.Init</c>, so the Spectre lane is still live (the lanes rule holds).</summary>
+    internal static int OfferInit(string? repoPath, Func<bool> confirm)
+    {
+        if (!confirm())
+        {
+            AnsiConsole.MarkupLine("No changes — run [bold]orca init[/] when you're ready.");
+            return 0;
+        }
+
+        var workspace = GitWorkspace.Discover(repoPath ?? Directory.GetCurrentDirectory());
+        return InitCommand.Scaffold(workspace, requestedVault: null, plansDir: null, interactive: true);
+    }
+
+    private static bool Confirm() =>
+        AnsiConsole.Prompt(new ConfirmationPrompt("No orca.json here — scaffold one now?") { DefaultValue = false });
 
     /// <summary>Open the read-only TUI over the repo's current status. The caller has
     /// already confirmed the terminal is interactive (bare <c>orca</c> checks it before
