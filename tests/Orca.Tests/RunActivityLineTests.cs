@@ -5,15 +5,19 @@ using Orca.Core.Run;
 
 namespace Orca.Tests;
 
-/// <summary>The pure lifecycle projection behind the run view's activity pane (tui-plan
-/// build-order step 5). Mirrors StreamEventDisplayTests' shape: assert on the flattened
-/// text and the styled runs' roles, no Terminal.Gui shell. Step 5 renders LIFECYCLE events
-/// only — RoleStreamEvent is deliberately projected to nothing (that live stream is step
-/// 6).</summary>
+/// <summary>The pure projection behind the run view's activity pane (tui-plan build-order
+/// steps 5–6). Mirrors StreamEventDisplayTests' shape: assert on the flattened text and the
+/// styled runs' roles, no Terminal.Gui shell. Covers both the LIFECYCLE lines (step 5) and
+/// the per-token STREAM projected through StreamEventDisplay for all four roles (step 6).</summary>
 public sealed class RunActivityLineTests
 {
     private static string Plain(IReadOnlyList<StyledLine> lines)
         => string.Join("\n", lines.Select(l => l.PlainText()));
+
+    private static string[] FixtureLines(string name) =>
+        File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "Fixtures", "Transcripts", name))
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToArray();
 
     private static TuiRole RoleOf(IReadOnlyList<StyledLine> lines, string runText)
     {
@@ -134,12 +138,70 @@ public sealed class RunActivityLineTests
     }
 
     [Fact]
-    public void Role_stream_event_projects_to_nothing_this_step()
+    public void Stream_tool_use_is_role_tagged_and_carries_the_display_text_verbatim()
     {
-        // Step 6, not step 5: the per-event live stream stays out of the lifecycle pane.
-        var raw = new ClaudeStreamEvent { Type = "assistant", RawLine = "{}" };
+        var raw = ClaudeStreamEvent.Parse(
+            """{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"src/Foo.cs"}}]}}""");
         var lines = RunActivityLine.Describe(new RunObservation.RoleStreamEvent(RoleName.Implementer, raw));
 
-        Assert.Empty(lines);
+        var line = Assert.Single(lines);
+        // Same faint [role] gutter the lifecycle lines wear, plus the ⚒ tool-use glyph, and
+        // the text is StreamEventDisplay's verbatim — so the two sources stay aligned.
+        Assert.Equal("[implementer] ⚒ Read(src/Foo.cs)", line.PlainText());
+        Assert.Equal(TuiRole.Faint, RoleOf(lines, "[implementer] "));
+        Assert.Equal(TuiRole.Accent, RoleOf(lines, "⚒ "));
+    }
+
+    [Fact]
+    public void Stream_assistant_text_reads_as_a_write_line()
+    {
+        var raw = ClaudeStreamEvent.Parse(
+            """{"type":"assistant","message":{"content":[{"type":"text","text":"Adding the endpoint"}]}}""");
+        var lines = RunActivityLine.Describe(new RunObservation.RoleStreamEvent(RoleName.Planner, raw));
+
+        Assert.Equal("[planner] ✎ Adding the endpoint", Assert.Single(lines).PlainText());
+        Assert.Equal(TuiRole.Accent, RoleOf(lines, "✎ "));
+    }
+
+    [Fact]
+    public void One_stream_event_can_yield_several_lines()
+    {
+        // An assistant message carrying text plus two tool_use blocks projects to three lines.
+        var raw = ClaudeStreamEvent.Parse(
+            """{"type":"assistant","message":{"content":[{"type":"text","text":"go"},{"type":"tool_use","name":"Read","input":{"file_path":"a"}},{"type":"tool_use","name":"Write","input":{"file_path":"b"}}]}}""");
+        var lines = RunActivityLine.Describe(new RunObservation.RoleStreamEvent(RoleName.Verifier, raw));
+
+        Assert.Equal(3, lines.Count);
+        Assert.All(lines, l => Assert.StartsWith("[verifier] ", l.PlainText()));
+    }
+
+    [Theory]
+    [InlineData(RoleName.Planner)]
+    [InlineData(RoleName.Implementer)]
+    [InlineData(RoleName.Reconciler)]
+    [InlineData(RoleName.Verifier)]
+    public void Every_success_transcript_line_projects_to_a_role_tagged_line_for_every_role(RoleName role)
+    {
+        // The live pane is the flagship feature precisely because it covers all four roles;
+        // each committed transcript event must project to a non-empty, gutter-tagged line.
+        var gutter = $"[{role.ToString().ToLowerInvariant()}] ";
+        foreach (var raw in FixtureLines("success.ndjson").Select(ClaudeStreamEvent.Parse))
+        {
+            var lines = RunActivityLine.Describe(new RunObservation.RoleStreamEvent(role, raw));
+
+            Assert.NotEmpty(lines);
+            Assert.All(lines, l => Assert.StartsWith(gutter, l.PlainText()));
+        }
+    }
+
+    [Fact]
+    public void Stream_result_line_carries_the_same_facts_as_the_lifecycle_finish()
+    {
+        // The continuity seam: a finished role reads the same via the stream's Result event
+        // as via the lifecycle RoleFinished line ("$x · n turns · Nm Ns").
+        var result = ClaudeStreamEvent.Parse(FixtureLines("success.ndjson").Last());
+        var streamLines = RunActivityLine.Describe(new RunObservation.RoleStreamEvent(RoleName.Implementer, result));
+
+        Assert.Contains("$0.16 · 2 turns · 9.5s", Plain(streamLines));
     }
 }

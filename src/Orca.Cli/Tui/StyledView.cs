@@ -7,13 +7,21 @@ namespace Orca.Cli.Tui;
 /// <see cref="TuiTheme"/>, greedy word-wrap to the current width, and arrow/page scrolling.
 /// This replaces the stock (and [Obsolete]) <c>TextView</c>, whose read-only role in the
 /// default v2 scheme rendered grey-on-grey — invisible text. Drawing is the only
-/// Terminal.Gui-specific part; content and wrapping stay pure (<see cref="StyledWrap"/>).</summary>
+/// Terminal.Gui-specific part; content and wrapping stay pure (<see cref="StyledWrap"/>).
+///
+/// For the live run pane (step 6) it also owns tail-follow: while <see cref="IsFollowing"/>
+/// each content update sticks to the bottom, but scrolling up pauses the follow so the
+/// reader can review scrollback without being yanked back down every drain tick; reaching
+/// the bottom again (or <c>End</c>) resumes it. This is built entirely on the view's own
+/// <c>_scroll</c>/<c>Viewport</c> model — no Terminal.Gui scroll widget, so there is no
+/// external scroll API to drift.</summary>
 internal sealed class StyledView : View
 {
     private IReadOnlyList<StyledLine> _lines = [];
     private IReadOnlyList<StyledLine> _wrapped = [];
     private int _wrapWidth = -1;
     private int _scroll;
+    private bool _follow = true;
 
     public StyledView()
     {
@@ -22,17 +30,40 @@ internal sealed class StyledView : View
         KeyDown += OnScrollKey;
     }
 
+    /// <summary>True while the view sticks to the tail; false once the reader has scrolled up
+    /// into scrollback. "At the bottom" (everything visible, or scrolled to the last page)
+    /// always reads as following.</summary>
+    public bool IsFollowing => _follow;
+
+    /// <summary>Raised when <see cref="IsFollowing"/> flips as a result of a scroll key, so a
+    /// host (the run screen's pane header) can repaint its follow indicator. Not raised by
+    /// <see cref="SetLines"/> — the host repaints its own chrome on each drain anyway.</summary>
+    public event Action? FollowChanged;
+
     public void SetLines(IReadOnlyList<StyledLine> lines) => SetLines(lines, scrollToEnd: false);
 
-    /// <summary>Replace the content; <paramref name="scrollToEnd"/> follows the tail (the
-    /// live-log idiom — the run screen appends lifecycle lines and wants the newest
-    /// visible). int.MaxValue is clamped to the last page by <see cref="OnDrawingContent"/>;
-    /// the scroll keys still let the reader page back up afterwards.</summary>
+    /// <summary>Replace the content. <paramref name="scrollToEnd"/> marks a tail view (the
+    /// live log): while following it snaps to the newest line, but if the reader has paused
+    /// the follow by scrolling up, the parked position is preserved as content grows.
+    /// Non-tail callers (detail, modals) pass false and start at the top. int.MaxValue is
+    /// clamped to the last page by <see cref="OnDrawingContent"/>.</summary>
     public void SetLines(IReadOnlyList<StyledLine> lines, bool scrollToEnd)
     {
         _lines = lines;
         _wrapWidth = -1;
-        _scroll = scrollToEnd ? int.MaxValue : 0;
+        if (!scrollToEnd)
+        {
+            // A fresh non-tail view: top, and follow re-armed for reuse.
+            _scroll = 0;
+            _follow = true;
+        }
+        else if (_follow)
+        {
+            _scroll = int.MaxValue;   // stick to the tail
+        }
+        // else: paused in scrollback — leave _scroll where the reader parked it. The clamp
+        // in OnDrawingContent keeps it valid as _wrapped grows.
+
         SetNeedsDraw();
     }
 
@@ -97,6 +128,17 @@ internal sealed class StyledView : View
             return;
 
         _scroll = Math.Clamp(t, 0, maxScroll);
+
+        // Follow == "am I at the bottom?" after this keypress: scrolling up into scrollback
+        // pauses the tail, returning to the last page (or End) resumes it. When everything
+        // fits (maxScroll == 0) we are always at the bottom, so follow stays on.
+        var following = _scroll >= maxScroll;
+        if (following != _follow)
+        {
+            _follow = following;
+            FollowChanged?.Invoke();
+        }
+
         key.Handled = true;
         SetNeedsDraw();
     }

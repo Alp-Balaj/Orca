@@ -5,14 +5,20 @@ using Orca.Core.Run;
 
 namespace Orca.Tests;
 
-/// <summary>The IRunObserver → bounded-channel adapter (tui-plan §3.6). Headless: no
-/// Terminal.Gui shell, just the write/drain contract. Confirms it batches, empties on
-/// drain, keeps the final events for the post-completion flush, and — the step-5 boundary
-/// — drops RoleStreamEvent at write time so the channel stays lifecycle-only.</summary>
+/// <summary>The IRunObserver → channel adapter (tui-plan §3.6). Headless: no Terminal.Gui
+/// shell, just the write/drain contract. Confirms it batches, empties on drain, keeps the
+/// final events for the post-completion flush, and — the step-6 change — carries the
+/// per-token stream through in arrival order alongside the lifecycle events (the transport
+/// no longer drops or filters; the bounded drop policy lives in
+/// <see cref="RunActivityBuffer"/>).</summary>
 public sealed class RunEventChannelTests
 {
     private static RunObservation Lifecycle(string branch) =>
         new RunObservation.BranchReady(branch, Created: true);
+
+    private static RunObservation Stream() =>
+        new RunObservation.RoleStreamEvent(
+            RoleName.Implementer, new ClaudeStreamEvent { Type = "assistant", RawLine = "{}" });
 
     [Fact]
     public void Drain_returns_written_lifecycle_events_in_order_then_empties()
@@ -31,24 +37,27 @@ public sealed class RunEventChannelTests
     }
 
     [Fact]
-    public void Role_stream_events_are_dropped_at_write_time_this_step()
+    public void Stream_events_flow_through_interleaved_with_lifecycle_in_arrival_order()
     {
         var channel = new RunEventChannel();
-        var raw = new ClaudeStreamEvent { Type = "assistant", RawLine = "{}" };
 
-        channel.OnRunEvent(new RunObservation.RoleStreamEvent(RoleName.Implementer, raw));
+        // The transport is now the high-volume sink (step 6): stream events enter alongside
+        // lifecycle events and nothing is dropped or reordered at this layer.
+        channel.OnRunEvent(Stream());
         channel.OnRunEvent(Lifecycle("a"));
-        channel.OnRunEvent(new RunObservation.RoleStreamEvent(RoleName.Implementer, raw));
+        channel.OnRunEvent(Stream());
 
         var batch = new List<RunObservation>();
-        Assert.Equal(1, channel.DrainInto(batch));
-        Assert.IsType<RunObservation.BranchReady>(Assert.Single(batch));
+        Assert.Equal(3, channel.DrainInto(batch));
+        Assert.IsType<RunObservation.RoleStreamEvent>(batch[0]);
+        Assert.IsType<RunObservation.BranchReady>(batch[1]);
+        Assert.IsType<RunObservation.RoleStreamEvent>(batch[2]);
     }
 
     [Fact]
     public void Events_written_before_complete_are_still_drainable_after_it()
     {
-        // The final drain after the session ends must not lose the last lifecycle events.
+        // The final drain after the session ends must not lose the last events.
         var channel = new RunEventChannel();
         channel.OnRunEvent(Lifecycle("last"));
         channel.Complete();

@@ -7,16 +7,20 @@ using Orca.Core.Run;
 namespace Orca.Cli.Tui;
 
 /// <summary>Pure projection of one <see cref="RunObservation"/> into styled activity-pane
-/// lines — the live view's content while a checkpoint session runs (build-order step 5).
+/// lines — the live view's content while a checkpoint session runs (build-order steps 5–6).
 /// Mirrors <see cref="Orca.Core.Execution.StreamEventDisplay"/>'s shape (a lenient, throw-free
 /// <c>Describe</c>) and <see cref="TuiText"/>'s voice (role tag faint, glyphs coloured,
 /// facts dim), with no Terminal.Gui types so it is unit-tested without the shell.
 ///
-/// This step renders LIFECYCLE events only — roles starting/finishing/retrying, gates,
-/// the branch, and vault records. <see cref="RunObservation.RoleStreamEvent"/> is the
-/// per-token live stream: deliberately projected to nothing here (an empty result the
-/// drain skips), because routing it through <see cref="Orca.Core.Execution.StreamEventDisplay"/>
-/// is build-order step 6, not step 5.</summary>
+/// Two kinds of line interleave here in arrival order. LIFECYCLE events — roles
+/// starting/finishing/retrying, gates, the branch, vault records (step 5). And the
+/// per-token live STREAM: <see cref="RunObservation.RoleStreamEvent"/> is projected through
+/// <see cref="Orca.Core.Execution.StreamEventDisplay.Describe"/> (step 6), so all four roles'
+/// invocations are visible as they happen — Planner via the strategy, Implementer via the
+/// runner, Reconciler and Verifier via the verifier loops. Both kinds wear the same faint
+/// <c>[role]</c> gutter; the stream borrows StreamEventDisplay's text verbatim, which keeps
+/// a role's finishing facts ("$x · n turns · Nm Ns") reading identically whether they arrive
+/// as the stream's own Result line or the lifecycle <see cref="RoleFinished"/> line.</summary>
 internal static class RunActivityLine
 {
     public static IReadOnlyList<StyledLine> Describe(RunObservation observation) => observation switch
@@ -28,11 +32,45 @@ internal static class RunActivityLine
         RunObservation.GateFinished e => [GateFinished(e.Result)],
         RunObservation.BranchReady e => [BranchReady(e)],
         RunObservation.VaultRecordWritten e => [VaultRecordWritten(e)],
-
-        // Step 6, not step 5: the per-event live stream stays out of the lifecycle pane.
-        RunObservation.RoleStreamEvent => [],
+        RunObservation.RoleStreamEvent e => RoleStreamEvent(e),
 
         _ => [],
+    };
+
+    /// <summary>The step-6 live stream: each <see cref="DisplayLine"/> the lenient projection
+    /// yields becomes one role-tagged styled line — the same <c>[role]</c> gutter the
+    /// lifecycle lines use, plus a glyph and colour keyed on <see cref="DisplayKind"/>. One
+    /// stream event can yield several lines (assistant text plus tool-use blocks); the empty
+    /// case never happens (StreamEventDisplay always falls back to the bare event type).</summary>
+    private static IReadOnlyList<StyledLine> RoleStreamEvent(RunObservation.RoleStreamEvent e)
+    {
+        var display = StreamEventDisplay.Describe(e.Event);
+        var lines = new List<StyledLine>(display.Count);
+        foreach (var line in display)
+            lines.Add(StreamLine(e.Role, line));
+        return lines;
+    }
+
+    private static StyledLine StreamLine(RoleName role, DisplayLine line)
+    {
+        var (glyph, glyphRole, textRole) = StreamStyle(line.Kind);
+        return new StyledLine([Tag(role), new(glyph, glyphRole), new(line.Text, textRole)]);
+    }
+
+    /// <summary>Glyph + colours per stream-event kind, in <see cref="TuiText"/>'s voice:
+    /// actions (tool use) and writes (assistant text) get the coral accent glyph the §4
+    /// mockup shows; tool results hang off the faint <c>⎿</c> connector like the detail
+    /// pane's evidence; the result line stays neutral (its pass/fail is spoken by the
+    /// lifecycle <see cref="RoleFinished"/> line, so a green tick here would double up).</summary>
+    private static (string Glyph, TuiRole GlyphRole, TuiRole TextRole) StreamStyle(DisplayKind kind) => kind switch
+    {
+        DisplayKind.Init => ("● ", TuiRole.Faint, TuiRole.Dim),
+        DisplayKind.AssistantText => ("✎ ", TuiRole.Accent, TuiRole.Text),
+        DisplayKind.ToolUse => ("⚒ ", TuiRole.Accent, TuiRole.Dim),
+        DisplayKind.ToolResult => ("⎿ ", TuiRole.Faint, TuiRole.Dim),
+        DisplayKind.Result => ("● ", TuiRole.Dim, TuiRole.Dim),
+        DisplayKind.RateLimit => ("⏳ ", TuiRole.Warning, TuiRole.Warning),
+        _ => ("· ", TuiRole.Faint, TuiRole.Faint),
     };
 
     private static StyledLine RoleStarted(RunObservation.RoleStarted e)
