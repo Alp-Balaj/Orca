@@ -177,4 +177,107 @@ public sealed class GitWorkspaceTests : IDisposable
         Assert.Contains("(binary file, 3 bytes — content omitted)", diff);
         Assert.DoesNotContain(".orca/runs", diff);
     }
+
+    [Fact]
+    public void FullDiff_marks_a_nested_repo_directory_entry_without_reading_it_as_a_file()
+    {
+        var workspace = Workspace();
+        var nestedRepoPath = Path.Combine(_repo.Root, "vendor", "nested");
+        Directory.CreateDirectory(nestedRepoPath);
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = nestedRepoPath,
+            ArgumentList = { "init", "-b", "main" },
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using (var process = System.Diagnostics.Process.Start(startInfo)!)
+            process.WaitForExit();
+
+        var diff = workspace.FullDiff();
+
+        Assert.Contains("## New file (untracked): vendor/nested/", diff);
+        Assert.Contains("(directory entry — content omitted)", diff);
+    }
+
+    [Fact]
+    public void FullDiff_renders_a_broken_symlink_as_unreadable_instead_of_throwing()
+    {
+        var workspace = Workspace();
+        var linkPath = Path.Combine(_repo.Root, "broken-link");
+        File.CreateSymbolicLink(linkPath, Path.Combine(_repo.Root, "does-not-exist-target"));
+
+        var diff = workspace.FullDiff();
+
+        Assert.Contains("## New file (untracked): broken-link", diff);
+        Assert.Contains("(unreadable: broken-link:", diff);
+    }
+
+    [Fact]
+    public void FullDiff_renders_a_permission_denied_file_as_unreadable_instead_of_throwing()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+            return; // Unix file modes only.
+
+        var workspace = Workspace();
+        _repo.WriteFile("locked.txt", "secret\n");
+        var path = Path.Combine(_repo.Root, "locked.txt");
+        File.SetUnixFileMode(path, UnixFileMode.None);
+
+        try
+        {
+            var diff = workspace.FullDiff();
+
+            Assert.Contains("## New file (untracked): locked.txt", diff);
+            Assert.Contains("(unreadable: locked.txt:", diff);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public void FullDiff_truncates_a_single_untracked_file_past_the_per_file_budget()
+    {
+        var workspace = Workspace();
+        var oversized = new string('a', 64 * 1024 + 500);
+        _repo.WriteFile("big.txt", oversized);
+
+        var diff = workspace.FullDiff();
+
+        Assert.Contains("## New file (untracked): big.txt", diff);
+        Assert.Contains("(truncated, 500 bytes omitted — see git)", diff);
+        Assert.DoesNotContain(new string('a', 64 * 1024 + 1), diff);
+    }
+
+    [Fact]
+    public void FullDiff_replaces_further_untracked_files_once_the_total_budget_is_exhausted()
+    {
+        var workspace = Workspace();
+        // Four files at exactly the per-file budget exhaust the 256 KiB total budget.
+        for (var i = 0; i < 4; i++)
+            _repo.WriteFile($"chunk-{i}.txt", new string((char)('a' + i), 64 * 1024));
+        _repo.WriteFile("overflow.txt", "should not be embedded\n");
+
+        var diff = workspace.FullDiff();
+
+        Assert.Contains("## New file (untracked): overflow.txt", diff);
+        Assert.Contains("(truncated, untracked-content budget exhausted — see git)", diff);
+        Assert.DoesNotContain("should not be embedded", diff);
+    }
+
+    [Fact]
+    public void FullDiff_preserves_binary_detection_for_untracked_files()
+    {
+        var workspace = Workspace();
+        File.WriteAllBytes(Path.Combine(_repo.Root, "asset.bin"), [0x00, 0xFF, 0x10, 0x20]);
+
+        var diff = workspace.FullDiff();
+
+        Assert.Contains("## New file (untracked): asset.bin", diff);
+        Assert.Contains("(binary file, 4 bytes — content omitted)", diff);
+    }
 }

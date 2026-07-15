@@ -7,6 +7,21 @@ namespace Orca.Core.Git;
 /// branch without a human reviewing the diff.</summary>
 public sealed class GitWorkspace
 {
+    /// <summary>Per-untracked-file embed cap. Past this, a file's content is truncated
+    /// with a marker naming the omitted byte count — one runaway fixture or generated
+    /// asset must not blow out the reviewable diff.</summary>
+    private const int PerFileByteBudget = 64 * 1024;
+
+    /// <summary>Cumulative cap across all untracked files' embedded content. Once
+    /// exceeded, remaining untracked files are replaced by a marker rather than
+    /// embedded at all.</summary>
+    private const int TotalUntrackedByteBudget = 256 * 1024;
+
+    /// <summary>Hard ceiling on the whole returned text (tracked diff + untracked
+    /// embeds + markers). Belt-and-braces against the tracked `git diff HEAD` output
+    /// itself being enormous.</summary>
+    private const int TotalOutputByteBudget = 1024 * 1024;
+
     private GitWorkspace(string repoRoot) => RepoRoot = repoRoot;
 
     public string RepoRoot { get; }
@@ -53,6 +68,7 @@ public sealed class GitWorkspace
         sb.Append(GitProcess.Run(RepoRoot, ["diff", "HEAD"]).Stdout);
 
         var status = GitProcess.Run(RepoRoot, ["status", "--porcelain", "-z", "-uall"]).Stdout;
+        var untrackedTotal = 0;
         foreach (var entry in status.Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
             if (!entry.StartsWith("?? ", StringComparison.Ordinal))
@@ -60,12 +76,53 @@ public sealed class GitWorkspace
 
             var path = entry[3..];
             sb.Append($"\n## New file (untracked): {path}\n\n");
+
+            // `-uall` still reports a nested repo/submodule or an otherwise-untraversable
+            // directory as a single "?? path/" entry — reading it as a file would throw.
+            if (path.EndsWith('/'))
+            {
+                sb.Append("(directory entry — content omitted)\n");
+                continue;
+            }
+
+            if (untrackedTotal >= TotalUntrackedByteBudget)
+            {
+                sb.Append("(truncated, untracked-content budget exhausted — see git)\n");
+                continue;
+            }
+
             var fullPath = Path.Combine(RepoRoot, path.Replace('/', Path.DirectorySeparatorChar));
-            var bytes = File.ReadAllBytes(fullPath);
+            byte[] bytes;
+            try
+            {
+                bytes = File.ReadAllBytes(fullPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                sb.Append($"(unreadable: {path}: {ex.Message})\n");
+                continue;
+            }
+
             if (Array.IndexOf(bytes, (byte)0, 0, Math.Min(bytes.Length, 8000)) >= 0)
+            {
                 sb.Append($"(binary file, {bytes.Length} bytes — content omitted)\n");
-            else
-                sb.Append(System.Text.Encoding.UTF8.GetString(bytes)).Append('\n');
+                continue;
+            }
+
+            var remaining = TotalUntrackedByteBudget - untrackedTotal;
+            var embedLength = Math.Min(bytes.Length, Math.Min(PerFileByteBudget, remaining));
+            sb.Append(System.Text.Encoding.UTF8.GetString(bytes, 0, embedLength)).Append('\n');
+            untrackedTotal += embedLength;
+
+            var omitted = bytes.Length - embedLength;
+            if (omitted > 0)
+                sb.Append($"(truncated, {omitted} bytes omitted — see git)\n");
+        }
+
+        if (sb.Length > TotalOutputByteBudget)
+        {
+            sb.Length = TotalOutputByteBudget;
+            sb.Append("\n(truncated, output budget exhausted — see git)\n");
         }
 
         return sb.ToString();
