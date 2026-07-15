@@ -21,6 +21,7 @@
   "maxCheckpointAttempts": 3,
   "roles": {
     "planner": {
+      "model": "opus",
       "allowedTools": [
         "Read",
         "Write",
@@ -31,6 +32,7 @@
       "maxBudgetUsd": 2
     },
     "implementer": {
+      "model": "sonnet",
       "allowedTools": [
         "Read",
         "Glob",
@@ -48,6 +50,7 @@
       "maxBudgetUsd": 5
     },
     "reconciler": {
+      "model": "haiku",
       "allowedTools": [
         "Read",
         "Write",
@@ -58,6 +61,7 @@
       "maxBudgetUsd": 2
     },
     "verifier": {
+      "model": "sonnet",
       "allowedTools": [
         "Read",
         "Write",
