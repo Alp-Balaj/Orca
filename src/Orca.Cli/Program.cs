@@ -16,6 +16,8 @@ app.Configure(config =>
     config.SetApplicationName("orca");
     config.PropagateExceptions();
 
+    config.AddCommand<InitCommand>("init")
+        .WithDescription("Scaffold a committed orca.json in this repo, then stop for you to review and commit it.");
     config.AddCommand<PlanInitCommand>("plan-init")
         .WithDescription("Create a plan directory with a schema-valid skeleton plan file in the vault.");
     config.AddCommand<PlanGenerateCommand>("plan-generate")
