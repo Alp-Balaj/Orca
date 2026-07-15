@@ -26,7 +26,7 @@ public sealed class InitCommand : Command<InitCommand.Settings>
         public string? Vault { get; init; }
 
         [CommandOption("--plans-dir <REL>")]
-        [Description("vault.plansDir value, relative to the vault root. Defaults to a matching <RepoName> folder found in the vault (else <RepoName>/Plans).")]
+        [Description("vault.plansDir value, relative to the vault root. Defaults to Orca/<RepoName>/Plans (whose folders orca init creates in the vault).")]
         public string? PlansDir { get; init; }
 
         [CommandOption("--force")]
@@ -68,10 +68,14 @@ public sealed class InitCommand : Command<InitCommand.Settings>
     /// <summary>The write-and-stop tail shared by <see cref="Execute"/> and the bare-<c>orca</c>
     /// / <c>orca ui</c> onboarding offer (plan orca-init, checkpoint 4 — see
     /// <see cref="Orca.Cli.Tui.TuiEntry"/>): resolve the vault against the global config
-    /// (read-only), detect commands, write the parse-checked scaffold at the repo root, then
-    /// STOP with the review-and-commit guidance. No <c>git add</c>/<c>commit</c>, no
-    /// global-config edit. Don't-clobber is the caller's decision — reaching here means the
-    /// write is meant to happen (the offer only fires when <c>orca.json</c> is absent).</summary>
+    /// (read-only), detect commands, resolve <c>vault.plansDir</c> to the canonical
+    /// <c>Orca/&lt;repoName&gt;/Plans</c> — creating its folders in the vault unless <c>--plans-dir</c>
+    /// named a location itself — write the parse-checked scaffold at the repo root, then STOP with
+    /// the review-and-commit guidance. No <c>git add</c>/<c>commit</c>, no global-config edit; the
+    /// vault-folder creation is the one write outside the repo, and it never throws (see
+    /// <see cref="OrcaConfigScaffold.DetectPlansDir"/>). Don't-clobber is the caller's decision —
+    /// reaching here means the write is meant to happen (the offer only fires when <c>orca.json</c>
+    /// is absent).</summary>
     internal static int Scaffold(GitWorkspace workspace, string? requestedVault, string? plansDir, bool interactive)
     {
         var globalPath = ConfigLoader.GlobalConfigPath();
@@ -87,11 +91,7 @@ public sealed class InitCommand : Command<InitCommand.Settings>
         var vaultRoot = vaults![vaultName];
         var repoName = Path.GetFileName(workspace.RepoRoot);
 
-        var (resolvedPlansDir, plansSummary) = ResolvePlansDir(
-            plansDir,
-            OrcaConfigScaffold.DetectPlansDir(vaultRoot, repoName),
-            interactive,
-            PickPlansDirInteractively);
+        var (resolvedPlansDir, plansSummary) = ResolvePlansDir(plansDir, vaultRoot, repoName);
 
         var detected = OrcaConfigScaffold.DetectCommands(workspace.RepoRoot);
         var json = OrcaConfigScaffold.Build(new OrcaConfigScaffoldInput
@@ -170,41 +170,24 @@ public sealed class InitCommand : Command<InitCommand.Settings>
             .Title("Which vault should this repo use?")
             .AddChoices(names));
 
-    /// <summary>Chooses the <c>vault.plansDir</c> to scaffold, and the line to echo, from the
-    /// <c>--plans-dir</c> flag and <see cref="OrcaConfigScaffold.DetectPlansDir"/>'s result. An
-    /// explicit flag wins outright. Several matching vault folders prompt a pick on an interactive
-    /// terminal (owner decision 2026-07-15) and otherwise fall back to the detector's default with a
-    /// line pointing at <c>--plans-dir</c> — so a non-interactive run never hides a prompt (plan
-    /// constraint 5). Pure and testable: the pick is injected, exactly like
-    /// <see cref="ResolveVaultName"/>.</summary>
+    /// <summary>Chooses the <c>vault.plansDir</c> to scaffold, and the line to echo. An explicit
+    /// <c>--plans-dir</c> wins outright and is written straight through — no vault I/O, nothing
+    /// created, because the human named their own location. Otherwise the canonical
+    /// <c>Orca/&lt;repoName&gt;/Plans</c> is used and its parent folders are created in the vault when the
+    /// root exists (owner decision 2026-07-15); that creation lives in
+    /// <see cref="OrcaConfigScaffold.DetectPlansDir"/>, which never throws for an absent or unwritable
+    /// vault, so even a non-interactive run still leaves a reviewable file (plan constraint 5).</summary>
     internal static (string PlansDir, string Summary) ResolvePlansDir(
         string? requested,
-        DetectedPlansDir detected,
-        bool interactive,
-        Func<IReadOnlyList<string>, string> pick)
+        string vaultRoot,
+        string repoName)
     {
         if (requested is not null)
             return (requested, $"plansDir \"{requested}\" (from --plans-dir)");
 
-        if (detected.Candidates.Count > 1)
-        {
-            if (interactive)
-            {
-                var chosen = pick(detected.Candidates);
-                return (chosen, $"plansDir \"{chosen}\" (chosen from {detected.Candidates.Count} matching vault folders)");
-            }
-
-            return (detected.PlansDir,
-                $"multiple folders match this repo in the vault ({string.Join(", ", detected.Candidates)}) — defaulted to \"{detected.PlansDir}\"; pass --plans-dir to choose");
-        }
-
-        return (detected.PlansDir, detected.Summary);
+        var prepared = OrcaConfigScaffold.DetectPlansDir(vaultRoot, repoName);
+        return (prepared.PlansDir, prepared.Summary);
     }
-
-    private static string PickPlansDirInteractively(IReadOnlyList<string> candidates) =>
-        AnsiConsole.Prompt(new SelectionPrompt<string>()
-            .Title("Multiple vault folders match this repo — which should hold the plans?")
-            .AddChoices(candidates));
 
     private static IReadOnlyDictionary<string, string>? LoadGlobalVaults(string globalPath) =>
         File.Exists(globalPath)

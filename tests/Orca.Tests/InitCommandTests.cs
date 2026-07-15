@@ -11,9 +11,35 @@ namespace Orca.Tests;
 /// without a real console (same style as <see cref="NonInteractiveCliTests"/>). The actual
 /// file write is covered by <see cref="OrcaConfigScaffoldTests"/>, which round-trips the
 /// scaffold bytes back through <see cref="ConfigLoader.Load"/>.</summary>
-public sealed class InitCommandTests
+public sealed class InitCommandTests : IDisposable
 {
     private const string GlobalPath = "/global/config.json";
+
+    private readonly string _root =
+        Path.Combine(Path.GetTempPath(), "orca-init-tests-" + Guid.NewGuid().ToString("N"));
+
+    public InitCommandTests() => Directory.CreateDirectory(_root);
+
+    public void Dispose()
+    {
+        try
+        {
+            Directory.Delete(_root, recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private string MakeTempVault()
+    {
+        var vault = Path.Combine(_root, "vault-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(vault);
+        return vault;
+    }
 
     // --- Don't-clobber: never overwrite without --force; --force confirms on a TTY only ---
 
@@ -114,81 +140,29 @@ public sealed class InitCommandTests
         Assert.Equal(["a", "b"], offered); // the pick is offered the ordinal-ordered keys
     }
 
-    // --- plansDir resolution: --plans-dir vs. detector, with a pick only when several match ---
-
-    private static string ThrowIfPickedPlans(IReadOnlyList<string> _) =>
-        throw new InvalidOperationException("the interactive plansDir pick must not be reached");
-
-    private static DetectedPlansDir Detected(string plansDir, bool isFallback, params string[] candidates) =>
-        new()
-        {
-            PlansDir = plansDir,
-            Candidates = candidates,
-            IsFallback = isFallback,
-            Summary = "detector summary",
-        };
+    // --- plansDir resolution: --plans-dir wins verbatim; its absence prepares Orca/<repo>/Plans ---
 
     [Fact]
-    public void An_explicit_plans_dir_flag_wins_over_detection_and_never_prompts()
+    public void An_explicit_plans_dir_flag_wins_and_creates_nothing_in_the_vault()
     {
-        var (plansDir, summary) = InitCommand.ResolvePlansDir(
-            requested: "custom/here",
-            Detected("Active/MyApp/Plans", isFallback: false, "Active/MyApp/Plans", "Archive/MyApp/Plans"),
-            interactive: true,
-            ThrowIfPickedPlans);
+        var vault = MakeTempVault();
+
+        var (plansDir, summary) = InitCommand.ResolvePlansDir("custom/here", vault, "MyApp");
 
         Assert.Equal("custom/here", plansDir);
         Assert.Contains("--plans-dir", summary);
+        // The human named their own location — orca init must not create the canonical folders.
+        Assert.False(Directory.Exists(Path.Combine(vault, "Orca")));
     }
 
     [Fact]
-    public void A_single_or_fallback_detection_is_used_verbatim_without_a_prompt()
+    public void No_plans_dir_flag_prepares_the_canonical_path_and_creates_the_vault_folders()
     {
-        // One confident match: used as-is, on both terminals, no pick.
-        var (single, singleSummary) = InitCommand.ResolvePlansDir(
-            requested: null, Detected("Projects/MyApp/Plans", isFallback: false),
-            interactive: true, ThrowIfPickedPlans);
-        Assert.Equal("Projects/MyApp/Plans", single);
-        Assert.Equal("detector summary", singleSummary); // the detector's own line is echoed
+        var vault = MakeTempVault();
 
-        // No match: the edit-me fallback flows straight through, non-interactive included.
-        var (fallback, _) = InitCommand.ResolvePlansDir(
-            requested: null, Detected("MyApp/Plans", isFallback: true),
-            interactive: false, ThrowIfPickedPlans);
-        Assert.Equal("MyApp/Plans", fallback);
-    }
+        var (plansDir, _) = InitCommand.ResolvePlansDir(requested: null, vault, "MyApp");
 
-    [Fact]
-    public void Multiple_matching_folders_prompt_to_pick_on_an_interactive_terminal()
-    {
-        var offered = new List<string>();
-
-        var (plansDir, summary) = InitCommand.ResolvePlansDir(
-            requested: null,
-            Detected("MyApp/Plans", isFallback: false, "Active/MyApp/Plans", "Archive/MyApp/Plans"),
-            interactive: true,
-            candidates =>
-            {
-                offered.AddRange(candidates);
-                return "Archive/MyApp/Plans";
-            });
-
-        Assert.Equal("Archive/MyApp/Plans", plansDir);
-        Assert.Equal(["Active/MyApp/Plans", "Archive/MyApp/Plans"], offered);
-        Assert.Contains("chosen from 2", summary);
-    }
-
-    [Fact]
-    public void Multiple_matching_folders_fall_back_and_point_at_the_flag_when_non_interactive()
-    {
-        var (plansDir, summary) = InitCommand.ResolvePlansDir(
-            requested: null,
-            Detected("MyApp/Plans", isFallback: false, "Active/MyApp/Plans", "Archive/MyApp/Plans"),
-            interactive: false,
-            ThrowIfPickedPlans);
-
-        Assert.Equal("MyApp/Plans", plansDir); // the detector's safe default, no prompt hidden
-        Assert.Contains("--plans-dir", summary);
-        Assert.Contains("Active/MyApp/Plans", summary); // the candidates are named so the human can choose
+        Assert.Equal("Orca/MyApp/Plans", plansDir);
+        Assert.True(Directory.Exists(Path.Combine(vault, "Orca", "MyApp")));
     }
 }

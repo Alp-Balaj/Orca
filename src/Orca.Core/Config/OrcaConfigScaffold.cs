@@ -139,101 +139,58 @@ public static class OrcaConfigScaffold
         };
     }
 
-    /// <summary>Best-effort default for <c>vault.plansDir</c>: the vault is the human's Obsidian
-    /// vault, usually organized into nested folders, so a bare <c>&lt;RepoName&gt;/Plans</c> at the
-    /// vault root (the <see cref="Build"/> fallback) almost never matches. This scans the vault for a
-    /// folder whose leaf name is the repo's, and — when there is exactly one — proposes
-    /// <c>&lt;that relative path&gt;/Plans</c>, so plans land beside where the project already lives
-    /// instead of at a fresh top-level folder. The "exactly one" discipline mirrors
-    /// <see cref="DetectCommands"/>: zero or several matches fall back to <c>&lt;RepoName&gt;/Plans</c>
-    /// (with the several-match set surfaced as <see cref="DetectedPlansDir.Candidates"/> so the caller
-    /// can offer a pick). A vault root that is absent on this machine also falls back — never throws,
-    /// so <c>orca init</c> still writes a reviewable file. Directory-only walk, dot-folders skipped
-    /// (<c>.git</c>/<c>.obsidian</c>/<c>.trash</c> hold no plans and only risk a spurious match).</summary>
-    public static DetectedPlansDir DetectPlansDir(string vaultRoot, string repoName)
+    /// <summary>Resolves <c>vault.plansDir</c> to its one canonical location,
+    /// <c>Orca/&lt;repoName&gt;/Plans</c>, and — when the vault root exists on this machine — creates the
+    /// <c>Orca/</c> and <c>Orca/&lt;repoName&gt;/</c> folders under it, so a place for the plans is
+    /// waiting the moment the human commits <c>orca.json</c> (owner decision 2026-07-15: one fixed
+    /// path, never a walk of the vault for a folder that happens to share the repo's name). The
+    /// <c>Plans</c> leaf is deliberately <em>not</em> pre-created: like the rest of the vault-writing
+    /// code (<see cref="Orca.Core.Vault.VaultWriter"/> / <see cref="Orca.Core.Vault.PlanScaffold"/>) it
+    /// comes into being the first time a plan is written under it. This is the only method here that
+    /// writes to disk, and it keeps <see cref="DetectPlansDir"/>'s fail-never posture: a vault root
+    /// that is absent on this machine creates nothing (mirroring the old fallback trigger), and an
+    /// <see cref="UnauthorizedAccessException"/>/<see cref="IOException"/> creating the folder degrades
+    /// to returning the path string with nothing created rather than crashing <c>orca init</c> — the
+    /// leaf-less directory would have been created lazily anyway. Creation is idempotent:
+    /// <see cref="Directory.CreateDirectory(string)"/> is a no-op when the folder is already there. The
+    /// caller only reaches this when no <c>--plans-dir</c> was given; an explicit flag is trusted and
+    /// written straight through, so nothing is ever created when the human named their own location.
+    /// plansDir is always spelled with forward slashes — <see cref="Orca.Core.Vault.VaultLayout"/>
+    /// re-splits it on them.</summary>
+    public static PreparedPlansDir DetectPlansDir(string vaultRoot, string repoName)
     {
         if (string.IsNullOrWhiteSpace(repoName))
             throw new ArgumentException("repo name must be non-empty", nameof(repoName));
 
-        var fallback = $"{repoName}/Plans";
+        var plansDir = $"Orca/{repoName}/Plans";
 
         if (string.IsNullOrWhiteSpace(vaultRoot) || !Directory.Exists(vaultRoot))
-            return new DetectedPlansDir
+            return new PreparedPlansDir
             {
-                PlansDir = fallback,
-                Candidates = [],
-                IsFallback = true,
+                PlansDir = plansDir,
                 Summary =
-                    $"vault root not found on this machine — plansDir defaults to \"{fallback}\"; edit it to match your vault",
+                    $"vault root not found on this machine — plansDir \"{plansDir}\"; its folders will be created in the vault on first use",
             };
 
-        // plansDir is always spelled with forward slashes (VaultLayout re-splits on them); the leaf
-        // match is case-insensitive because a vault folder and a repo dir need not agree on casing.
-        var candidates = EnumerateVaultDirectories(vaultRoot)
-            .Where(dir => Path.GetFileName(dir).Equals(repoName, StringComparison.OrdinalIgnoreCase))
-            .Select(dir => Path.GetRelativePath(vaultRoot, dir).Replace(Path.DirectorySeparatorChar, '/') + "/Plans")
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToList();
-
-        return candidates switch
+        try
         {
-            [] => new DetectedPlansDir
+            // One call creates both Orca/ and Orca/<repoName>/ (CreateDirectory makes every missing
+            // intermediate) and no-ops when they already exist. The Plans leaf is left to the writer.
+            Directory.CreateDirectory(Path.Combine(vaultRoot, "Orca", repoName));
+            return new PreparedPlansDir
             {
-                PlansDir = fallback,
-                Candidates = [],
-                IsFallback = true,
+                PlansDir = plansDir,
+                Summary = $"plansDir \"{plansDir}\" — folder ready in the vault",
+            };
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+        {
+            return new PreparedPlansDir
+            {
+                PlansDir = plansDir,
                 Summary =
-                    $"no \"{repoName}\" folder in the vault — plansDir defaults to \"{fallback}\"; edit it to match your vault",
-            },
-            [var only] => new DetectedPlansDir
-            {
-                PlansDir = only,
-                Candidates = [],
-                IsFallback = false,
-                Summary = $"matched vault folder — plansDir \"{only}\"",
-            },
-            var many => new DetectedPlansDir
-            {
-                PlansDir = fallback,
-                Candidates = many,
-                IsFallback = false,
-                Summary = $"multiple \"{repoName}\" folders in the vault",
-            },
-        };
-    }
-
-    /// <summary>Every descendant directory of the vault root, dot-folders (and their subtrees)
-    /// skipped, access errors swallowed rather than thrown: a scan for a default must never crash
-    /// <c>orca init</c>. Iterative so a deep vault cannot blow the stack.</summary>
-    private static IEnumerable<string> EnumerateVaultDirectories(string root)
-    {
-        var stack = new Stack<string>();
-        stack.Push(root);
-        while (stack.Count > 0)
-        {
-            var current = stack.Pop();
-            string[] children;
-            try
-            {
-                children = Directory.GetDirectories(current);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                continue;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                continue;
-            }
-
-            foreach (var child in children)
-            {
-                if (Path.GetFileName(child).StartsWith('.'))
-                    continue;
-                yield return child;
-                stack.Push(child);
-            }
+                    $"plansDir \"{plansDir}\" — could not create its folder in the vault ({ex.Message}); it will be created on first use",
+            };
         }
     }
 
@@ -292,17 +249,12 @@ public sealed record DetectedCommands
     public required bool IsPlaceholder { get; init; }
 }
 
-/// <summary>The <c>vault.plansDir</c> default chosen by <see cref="OrcaConfigScaffold.DetectPlansDir"/>.
-/// <see cref="PlansDir"/> is the value to use when the caller cannot (or need not) prompt — a single
-/// confident match, or the <c>&lt;RepoName&gt;/Plans</c> fallback. <see cref="Candidates"/> is
-/// non-empty only when several vault folders matched the repo name (each already suffixed
-/// <c>/Plans</c>, forward-slashed, ordinal-ordered): the caller offers these for an interactive pick
-/// and otherwise keeps <see cref="PlansDir"/>. <see cref="IsFallback"/> marks the edit-me default so
-/// the CLI can echo it as unconfirmed.</summary>
-public sealed record DetectedPlansDir
+/// <summary>The canonical <c>vault.plansDir</c> resolved by
+/// <see cref="OrcaConfigScaffold.DetectPlansDir"/> and the human-readable <see cref="Summary"/> the
+/// CLI echoes. There is only ever one path now — <c>Orca/&lt;repoName&gt;/Plans</c> — so, unlike the
+/// old vault scan, there is nothing to pick and no fallback to flag.</summary>
+public sealed record PreparedPlansDir
 {
     public required string PlansDir { get; init; }
-    public required IReadOnlyList<string> Candidates { get; init; }
     public required string Summary { get; init; }
-    public required bool IsFallback { get; init; }
 }

@@ -189,7 +189,7 @@ public sealed class OrcaConfigScaffoldTests : IDisposable
         Assert.Equal("custom/here", LoadScaffold(placeholder, plansDir: "custom/here").PlansDir);
     }
 
-    // --- Vault-aware plansDir detection (owner decision 2026-07-15) ---
+    // --- Canonical plansDir preparation (owner decision 2026-07-15: Orca/<repoName>/Plans, no scan) ---
 
     /// <summary>Creates <paramref name="relativeDirs"/> under a fresh vault root and returns it.</summary>
     private string MakeVaultWith(params string[] relativeDirs)
@@ -202,87 +202,63 @@ public sealed class OrcaConfigScaffoldTests : IDisposable
     }
 
     [Fact]
-    public void PlansDir_detection_finds_a_single_nested_folder_and_appends_Plans()
+    public void PlansDir_is_always_Orca_repoName_Plans()
     {
+        // A folder elsewhere in the vault that happens to share the repo's name is irrelevant now —
+        // there is exactly one canonical location, never a scan.
         var vault = MakeVaultWith("7 - Dev Folder/Projects/MyApp", "Notes");
 
-        var detected = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
+        var prepared = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
 
-        Assert.False(detected.IsFallback);
-        Assert.Empty(detected.Candidates);
-        Assert.Equal("7 - Dev Folder/Projects/MyApp/Plans", detected.PlansDir); // forward slashes, /Plans suffix
+        Assert.Equal("Orca/MyApp/Plans", prepared.PlansDir); // forward slashes, fixed shape
     }
 
     [Fact]
-    public void PlansDir_detection_matches_the_repo_name_case_insensitively()
+    public void PlansDir_preparation_creates_the_Orca_and_repo_folders_but_not_the_Plans_leaf()
     {
-        var vault = MakeVaultWith("Projects/myapp");
+        var vault = MakeVaultWith();
 
-        var detected = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
+        OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
 
-        Assert.False(detected.IsFallback);
-        Assert.Equal("Projects/myapp/Plans", detected.PlansDir);
+        Assert.True(Directory.Exists(Path.Combine(vault, "Orca", "MyApp")));
+        // The leaf is created lazily on first write, like the rest of the vault-writing code.
+        Assert.False(Directory.Exists(Path.Combine(vault, "Orca", "MyApp", "Plans")));
     }
 
     [Fact]
-    public void PlansDir_detection_falls_back_to_RepoName_Plans_when_nothing_matches()
+    public void PlansDir_preparation_is_idempotent_when_the_folders_already_exist()
     {
-        var vault = MakeVaultWith("Projects/SomethingElse");
+        var vault = MakeVaultWith("Orca/MyApp");
 
-        var detected = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
+        var first = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
+        var second = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
 
-        Assert.True(detected.IsFallback);
-        Assert.Empty(detected.Candidates);
-        Assert.Equal("MyApp/Plans", detected.PlansDir);
+        Assert.Equal("Orca/MyApp/Plans", first.PlansDir);
+        Assert.Equal("Orca/MyApp/Plans", second.PlansDir);
+        Assert.True(Directory.Exists(Path.Combine(vault, "Orca", "MyApp")));
     }
 
     [Fact]
-    public void PlansDir_detection_skips_dot_folders_so_a_hidden_match_does_not_count()
+    public void PlansDir_preparation_creates_nothing_when_the_vault_root_is_absent()
     {
-        // A folder named like the repo but living under a dot-folder (.git worktree, .trash) must not
-        // be picked — dot-subtrees are skipped wholesale, so this vault has no real match.
-        var vault = MakeVaultWith(".git/MyApp", ".trash/MyApp");
+        var absent = Path.Combine(_root, "does-not-exist");
 
-        var detected = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
+        var prepared = OrcaConfigScaffold.DetectPlansDir(absent, "MyApp");
 
-        Assert.True(detected.IsFallback);
-        Assert.Equal("MyApp/Plans", detected.PlansDir);
+        Assert.Equal("Orca/MyApp/Plans", prepared.PlansDir);
+        Assert.False(Directory.Exists(absent)); // never conjures the vault root into being
     }
 
     [Fact]
-    public void PlansDir_detection_surfaces_every_match_as_a_candidate_when_several_exist()
+    public void A_prepared_plansDir_round_trips_through_the_scaffold_and_config_load()
     {
-        var vault = MakeVaultWith("Active/MyApp", "Archive/MyApp");
-
-        var detected = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
-
-        Assert.False(detected.IsFallback);
-        // Ordinal-ordered, each already suffixed /Plans; PlansDir stays the safe fallback for callers
-        // that cannot prompt.
-        Assert.Equal(["Active/MyApp/Plans", "Archive/MyApp/Plans"], detected.Candidates);
-        Assert.Equal("MyApp/Plans", detected.PlansDir);
-    }
-
-    [Fact]
-    public void PlansDir_detection_falls_back_when_the_vault_root_is_absent_on_this_machine()
-    {
-        var detected = OrcaConfigScaffold.DetectPlansDir(
-            Path.Combine(_root, "does-not-exist"), "MyApp");
-
-        Assert.True(detected.IsFallback);
-        Assert.Equal("MyApp/Plans", detected.PlansDir);
-    }
-
-    [Fact]
-    public void A_detected_plansDir_round_trips_through_the_scaffold_and_config_load()
-    {
-        var vault = MakeVaultWith("7 - Dev Folder/Projects/MyApp");
-        var detected = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
+        var vault = MakeVaultWith();
+        var prepared = OrcaConfigScaffold.DetectPlansDir(vault, "MyApp");
 
         var placeholder = OrcaConfigScaffold.DetectCommands(MakeRepoWith("README.md"));
         Assert.Equal(
-            "7 - Dev Folder/Projects/MyApp/Plans",
-            LoadScaffold(placeholder, plansDir: detected.PlansDir).PlansDir);
+            "Orca/MyApp/Plans",
+            LoadScaffold(placeholder, plansDir: prepared.PlansDir).PlansDir);
     }
 
     [Fact]

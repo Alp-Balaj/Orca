@@ -155,7 +155,8 @@ Fastest path: from the repo root, run
 
 It scaffolds a schema-valid `orca.json` — vault name resolved from your global config
 (you pick when several are defined; `--vault <name>` to choose non-interactively),
-`plansDir` defaulted to `<RepoName>/Plans`, and `commands.build`/`commands.test` detected
+`plansDir` defaulted to `Orca/<RepoName>/Plans` (whose folders it creates under your vault
+root, unless you pass `--plans-dir`), and `commands.build`/`commands.test` detected
 from a top-level `.slnx`/`.sln`/`.csproj`/`package.json` (a `REPLACE_ME` placeholder when
 nothing matches). It then **stops** and asks you to review the commands and `vault.plansDir`
 and commit the file yourself — `init` never `git add`s or commits, and it refuses to
