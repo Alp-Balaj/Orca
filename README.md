@@ -45,6 +45,35 @@ The manual for driving Orca against a repository. The sections after it (Command
 Configuration, Auth) are the reference detail. Everything below was exercised for real
 in the first end-to-end run (RecipeApp health endpoint, 2026-07-08).
 
+### Interactive TUI
+
+`orca` with no arguments, on an interactive terminal, opens a full-screen TUI — the default
+entry point. `orca ui [--repo <path>]` launches it explicitly (for flags or muscle memory).
+On a non-interactive terminal bare `orca` prints this help (exit 0) and `orca ui` refuses
+cleanly with a one-line message (exit 1) — never a framework init crash; every subcommand
+below still works unchanged for scripting.
+
+The TUI is observability over the same workflow, not more autonomy — one session at a time,
+a human at every gate. Three parts:
+
+- **Shell** — a tree of the vault's plans → checkpoints (status-coloured), a detail pane for
+  the selection, and a status bar (repo · branch + dirty flag · vault · the selected plan's
+  accumulated cost). Arrow keys navigate and collapse/expand, `r` refreshes, `q` quits.
+- **Live pane** — press `x` to run the selected checkpoint: a preview modal authorizes the
+  spend, then all four roles (Planner/Implementer/Reconciler/Verifier) stream live as the
+  invocation runs, with scrollback (scroll up to pause tail-follow, End to resume) and an
+  honest elided-event count under load — the run log on disk always has everything. Ctrl-C
+  interrupts: it kills the invocation and leaves the attempt resumable, nothing re-paid. The
+  Approve/Reject/Defer gate is a modal; Reject chains the discard confirmation exactly as the
+  CLI does.
+- **Plan-generate form** — press `g` to draft a new plan: fields for id, goal (text or file),
+  base branch, title, and strategy (`multi` still refuses, per the CLI), then a gate-less
+  live Planner pane and the drafted-plan outcome. The draft still needs your approval in
+  Obsidian — the TUI never approves a plan.
+
+The TUI is `Orca.Cli` only (Terminal.Gui 2.4.17, pinned above); `Orca.Core` and every
+subcommand's output are unchanged.
+
 ### Prerequisites
 
 - .NET SDK 10.0.x and Claude Code CLI **2.1.201** (the pinned contract version) on PATH.
@@ -52,10 +81,13 @@ in the first end-to-end run (RecipeApp health endpoint, 2026-07-08).
   is the only credential Orca ever uses — there is no API key to configure, and a
   logged-out machine fails loudly at invocation time.
 - An Obsidian vault (any directory of Markdown works) and a target repository under git.
-- An interactive terminal. `checkpoint-run` ends in a real selection prompt; running it
-  from a non-TTY context (CI, a piped shell) currently crashes at that prompt *after*
-  the pipeline has run — a known limitation. The work is not lost (see Resuming below),
-  but drive it from a normal terminal.
+- An interactive terminal for the decision prompt. `checkpoint-run` ends in a real
+  Approve/Reject/Defer selection; on a non-TTY context (CI, a piped shell) it does **not**
+  crash — it runs the pipeline, then auto-defers, exiting **2** ("ran, needs a human") with
+  the attempt left in the resumable deferred state. Re-run it from a normal terminal and the
+  decision is picked back up with nothing re-paid (see Resuming below). A human's own
+  deliberate defer exits 0. Bare `orca` on an interactive terminal opens the full-screen TUI
+  instead (see Interactive TUI below); every subcommand keeps working for scripting.
 
 ### Install
 
@@ -204,7 +236,7 @@ Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its 
 ### Resuming and failures
 
 Every interruption resumes without re-paying: rate limit, auth expiry, budget kill,
-timeout, and the non-TTY prompt crash all leave records + run state behind, and the next
+timeout, and a non-TTY auto-defer all leave records + run state behind, and the next
 `checkpoint-run` continues from the first sub-step that has no record. Nothing is ever
 retried automatically; the CLI's own error text is printed with a per-cause hint (log in
 again, raise the ceiling, wait for the window). A failed gate writes the verification
@@ -226,6 +258,8 @@ record from machine facts alone and spends nothing on the LLM roles.
                        [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
     orca status [--plan <id>] [--repo <path>]
+    orca ui [--repo <path>]
+    orca                        (no arguments, on an interactive terminal — opens the TUI)
 
 `checkpoint-run` runs exactly one checkpoint — clean-tree check, branch
 `orca/{plan-id}/{checkpoint-id}` off the plan's base branch, one scoped `claude -p`
@@ -271,6 +305,12 @@ per-attempt in planning state (`.orca/state/<plan-id>.planning.json`). Auth expi
 rate limiting, budget kills, and timeouts fail the attempt loudly and are **never
 retried automatically**: re-run later and attempt numbering resumes. All four roles
 share one subscription window; only parse failures of a role's output file retry.
+
+`ui` opens the full-screen interactive TUI (see **Interactive TUI** above for the shell,
+live pane, and plan-generate form); bare `orca` on an interactive terminal opens the same
+TUI before Spectre dispatch, while on a non-interactive terminal bare `orca` prints help
+(exit 0) and `orca ui` refuses cleanly (exit 1). The TUI drives the same Core services as
+the subcommands and spends nothing until you authorize a run in its preview modal.
 
 ## Configuration
 
@@ -332,8 +372,12 @@ green gates, `implements_plan: full`, all criteria pass, human diff review, merg
 with the per-checkpoint cost ($1.14) visible in run state and derivable from the run
 logs.
 
-Known limitations: `checkpoint-run` on a non-interactive terminal crashes unhandled at
-the decision prompt after the pipeline has spent quota (the deferred-decision resume
-recovers it free on an interactive re-run); path-scoped file-tool allowlist rules don't
-match on CLI 2.1.201 (use bare tool names + deny rules); multi-candidate planning is
-deferred (`--strategy multi` refuses clearly).
+Non-TTY `checkpoint-run` is no longer a crash: it runs the pipeline, then auto-defers and
+exits **2** ("ran, needs a human"), with the attempt left in the resumable deferred state
+that an interactive re-run recovers for free (a human's deliberate defer exits 0). Known
+limitations that remain: path-scoped file-tool allowlist rules don't match on CLI 2.1.201
+(use bare tool names + deny rules); multi-candidate planning is deferred (`--strategy multi`
+refuses clearly); and the TUI tree reads **every** plan in the vault's plans directory, so a
+single plan with invalid frontmatter blocks the whole tree until you fix it — the parser
+fails loud with the offending file's path (never a crash), and the subcommands, which
+resolve a single plan, are unaffected.
