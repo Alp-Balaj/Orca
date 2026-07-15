@@ -26,7 +26,7 @@ public sealed class InitCommand : Command<InitCommand.Settings>
         public string? Vault { get; init; }
 
         [CommandOption("--plans-dir <REL>")]
-        [Description("vault.plansDir value, relative to the vault root. Defaults to <RepoName>/Plans.")]
+        [Description("vault.plansDir value, relative to the vault root. Defaults to a matching <RepoName> folder found in the vault (else <RepoName>/Plans).")]
         public string? PlansDir { get; init; }
 
         [CommandOption("--force")]
@@ -75,19 +75,30 @@ public sealed class InitCommand : Command<InitCommand.Settings>
     internal static int Scaffold(GitWorkspace workspace, string? requestedVault, string? plansDir, bool interactive)
     {
         var globalPath = ConfigLoader.GlobalConfigPath();
+        var vaults = LoadGlobalVaults(globalPath);
         var vaultName = ResolveVaultName(
-            LoadGlobalVaults(globalPath),
+            vaults,
             requestedVault,
             interactive,
             globalPath,
             PickVaultInteractively);
 
+        // Safe: ResolveVaultName only returns a name that is a key of a non-null, non-empty map.
+        var vaultRoot = vaults![vaultName];
+        var repoName = Path.GetFileName(workspace.RepoRoot);
+
+        var (resolvedPlansDir, plansSummary) = ResolvePlansDir(
+            plansDir,
+            OrcaConfigScaffold.DetectPlansDir(vaultRoot, repoName),
+            interactive,
+            PickPlansDirInteractively);
+
         var detected = OrcaConfigScaffold.DetectCommands(workspace.RepoRoot);
         var json = OrcaConfigScaffold.Build(new OrcaConfigScaffoldInput
         {
             VaultName = vaultName,
-            RepoName = Path.GetFileName(workspace.RepoRoot),
-            PlansDir = plansDir,
+            RepoName = repoName,
+            PlansDir = resolvedPlansDir,
             Commands = detected,
         });
 
@@ -96,6 +107,7 @@ public sealed class InitCommand : Command<InitCommand.Settings>
 
         AnsiConsole.MarkupLine($"[green]created[/] {repoFile.EscapeMarkup()}");
         AnsiConsole.MarkupLine($"vault [bold]{vaultName.EscapeMarkup()}[/]; {detected.Summary.EscapeMarkup()}");
+        AnsiConsole.MarkupLine(plansSummary.EscapeMarkup());
         AnsiConsole.MarkupLine(
             "Review [bold]commands[/] and [bold]vault.plansDir[/], then commit it (Orca never commits on its own) and run [bold]orca plan-generate[/].");
         return 0;
@@ -157,6 +169,42 @@ public sealed class InitCommand : Command<InitCommand.Settings>
         AnsiConsole.Prompt(new SelectionPrompt<string>()
             .Title("Which vault should this repo use?")
             .AddChoices(names));
+
+    /// <summary>Chooses the <c>vault.plansDir</c> to scaffold, and the line to echo, from the
+    /// <c>--plans-dir</c> flag and <see cref="OrcaConfigScaffold.DetectPlansDir"/>'s result. An
+    /// explicit flag wins outright. Several matching vault folders prompt a pick on an interactive
+    /// terminal (owner decision 2026-07-15) and otherwise fall back to the detector's default with a
+    /// line pointing at <c>--plans-dir</c> — so a non-interactive run never hides a prompt (plan
+    /// constraint 5). Pure and testable: the pick is injected, exactly like
+    /// <see cref="ResolveVaultName"/>.</summary>
+    internal static (string PlansDir, string Summary) ResolvePlansDir(
+        string? requested,
+        DetectedPlansDir detected,
+        bool interactive,
+        Func<IReadOnlyList<string>, string> pick)
+    {
+        if (requested is not null)
+            return (requested, $"plansDir \"{requested}\" (from --plans-dir)");
+
+        if (detected.Candidates.Count > 1)
+        {
+            if (interactive)
+            {
+                var chosen = pick(detected.Candidates);
+                return (chosen, $"plansDir \"{chosen}\" (chosen from {detected.Candidates.Count} matching vault folders)");
+            }
+
+            return (detected.PlansDir,
+                $"multiple folders match this repo in the vault ({string.Join(", ", detected.Candidates)}) — defaulted to \"{detected.PlansDir}\"; pass --plans-dir to choose");
+        }
+
+        return (detected.PlansDir, detected.Summary);
+    }
+
+    private static string PickPlansDirInteractively(IReadOnlyList<string> candidates) =>
+        AnsiConsole.Prompt(new SelectionPrompt<string>()
+            .Title("Multiple vault folders match this repo — which should hold the plans?")
+            .AddChoices(candidates));
 
     private static IReadOnlyDictionary<string, string>? LoadGlobalVaults(string globalPath) =>
         File.Exists(globalPath)
