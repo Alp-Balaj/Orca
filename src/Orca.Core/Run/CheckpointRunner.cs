@@ -70,14 +70,46 @@ public sealed class CheckpointRunner(
 
         var (checkpoint, index) = SelectCheckpoint(plan, checkpointId);
 
+        // The Reflexion loop's memory: the latest findings for this checkpoint ride the
+        // next attempt's prompt, read from the vault only (spec §8). Each is the latest
+        // of its kind — a gate-failed attempt has no reconciliation record. These same
+        // records are also this checkpoint's durable evidence for attempt numbering below.
+        var verifications = reader.ReadVerificationRecords(plan.PlanId, checkpoint.Id);
+        var reconciliations = reader.ReadReconciliationRecords(plan.PlanId, checkpoint.Id);
+        var runLogAttempts = ExistingRunLogAttempts(plan.PlanId, checkpoint.Id);
+
         var state = _stateStore.Read(plan.PlanId);
-        var attempt = state?.CheckpointId == checkpoint.Id ? state.Attempt + 1 : 1;
+        // RunState is a cache of the last attempt this machine knows about, not the
+        // source of truth — it can be hand-edited, stale after a crash, or simply absent
+        // on a different machine. It only gets a say when it actually names this
+        // checkpoint; otherwise the vault (plus any orphaned run logs) decides alone.
+        var stateAttempt = state?.CheckpointId == checkpoint.Id ? state.Attempt + 1 : 1;
+        var vaultAttempt = reader.NextAttemptNumber(plan.PlanId, checkpoint.Id);
+        // Evidence only ever pushes the number forward (AttemptTruth), so state sitting
+        // at or ahead of the vault is normal — verification simply hasn't caught up yet.
+        // The vault standing *ahead* of a state that claims this same checkpoint is the
+        // one shape that can't happen honestly: it means the vault holds evidence this
+        // machine's state never learned about, and blindly trusting the state's lower
+        // number would reuse an attempt the vault already has a record for.
+        if (state?.CheckpointId == checkpoint.Id && vaultAttempt > stateAttempt)
+            throw new CheckpointRunException(
+                $"run state says checkpoint '{checkpoint.Id}' is on attempt {stateAttempt}, but the vault's " +
+                $"verification/reconciliation records already show attempt {vaultAttempt} — refusing to guess " +
+                "which is right. Likely causes: a different checkpoint ran in between and this state was never " +
+                "updated, a second machine advanced this checkpoint independently, or .orca/state was deleted " +
+                "and partially restored. Recommended action: inspect the vault records for this checkpoint and " +
+                "either restore a consistent .orca/state or remove the stale one — there is no override for " +
+                "this check.");
+        var attempt = AttemptTruth.NextAttempt(stateAttempt, verifications, reconciliations, runLogAttempts);
+
         var branch = CheckpointBranch.Name(plan.PlanId, checkpoint.Id);
         var branchExists = workspace.BranchExists(branch);
 
         if (branchExists && attempt == 1)
             throw new CheckpointRunException(
-                $"branch '{branch}' already exists but run state shows no prior attempt for checkpoint '{checkpoint.Id}' — delete the branch or restore .orca/state before re-running");
+                $"branch '{branch}' already exists but neither run state nor the vault shows a prior attempt " +
+                $"for checkpoint '{checkpoint.Id}' — restore .orca/state if it was removed by mistake, or " +
+                "inspect the branch's contents before continuing");
 
         var pendingDecision = branchExists
             && state?.CheckpointId == checkpoint.Id
@@ -103,11 +135,6 @@ public sealed class CheckpointRunner(
         var childNotePath = _layout.ChildNoteFile(plan.PlanId, checkpoint.Id);
         var childNote = File.Exists(childNotePath) ? reader.ReadChildNote(plan, checkpoint.Id) : null;
 
-        // The Reflexion loop's memory: the latest findings for this checkpoint ride the
-        // next attempt's prompt, read from the vault only (spec §8). Each is the latest
-        // of its kind — a gate-failed attempt has no reconciliation record.
-        var verifications = reader.ReadVerificationRecords(plan.PlanId, checkpoint.Id);
-        var reconciliations = reader.ReadReconciliationRecords(plan.PlanId, checkpoint.Id);
         var feedback = new AttemptFeedback
         {
             Verification = verifications.Count > 0 ? verifications[^1] : null,
@@ -247,6 +274,27 @@ public sealed class CheckpointRunner(
     {
         if (discardChanges)
             workspace.DiscardAllChanges();
+    }
+
+    /// <summary>Attempt numbers that already have a run log under
+    /// <c>.orca/runs/&lt;plan&gt;/</c> for this checkpoint — the third witness
+    /// <see cref="AttemptTruth"/> weighs alongside run state and the vault.</summary>
+    private IReadOnlySet<int> ExistingRunLogAttempts(string planId, string checkpointId)
+    {
+        var directory = Path.Combine(_logLayout.RunsRoot, planId);
+        if (!Directory.Exists(directory))
+            return new HashSet<int>();
+
+        var prefix = $"{checkpointId}.attempt-";
+        var attempts = new HashSet<int>();
+        foreach (var path in Directory.EnumerateFiles(directory, $"{prefix}*.ndjson"))
+        {
+            var stem = Path.GetFileName(path)[prefix.Length..^".ndjson".Length];
+            if (int.TryParse(stem, out var attemptNumber))
+                attempts.Add(attemptNumber);
+        }
+
+        return attempts;
     }
 
     private static (Checkpoint Checkpoint, int Index) SelectCheckpoint(Plan plan, string? checkpointId)

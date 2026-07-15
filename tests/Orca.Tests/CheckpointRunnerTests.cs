@@ -229,6 +229,90 @@ public sealed class CheckpointRunnerTests : IDisposable
 
         var e = Assert.Throws<CheckpointRunException>(() => Runner(new FakeExecutor(_repo)).Prepare(null, null));
         Assert.Contains("already exists", e.Message);
+        // The branch may hold a human's in-progress work — Orca must never suggest
+        // deleting it as the fix.
+        Assert.DoesNotContain("delete the branch", e.Message);
+    }
+
+    [Fact]
+    public async Task Rerun_after_an_intervening_checkpoint_derives_the_attempt_from_the_vault_not_a_reset()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+
+        var firstA = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(firstA.Preview, firstA.Execution.Result!.TotalCostUsd);
+        // The Verifier's durable record for that attempt — the vault's memory of it —
+        // outlives the run-state cache, which is about to be overwritten by checkpoint B.
+        new Orca.Core.Vault.VaultWriter(new Orca.Core.Vault.VaultLayout(_vault, "Plans")).WriteVerificationRecord(
+            new VerificationRecord(
+                1, "recipe-tagging", 1, "01-tag-entity", 1, DateTimeOffset.Parse("2026-07-07T10:00:00Z"),
+                new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+                [new SemanticCriterionResult("Tag entity exists", SemanticVerdict.Pass, null)],
+                VerificationVerdict.Pass, "Looks good.\n"));
+
+        var firstB = await runner.RunAsync(runner.Prepare(null, "02-endpoints"));
+        runner.Approve(firstB.Preview, firstB.Execution.Result!.TotalCostUsd);
+        // Run state now points at checkpoint B — it has no opinion left on checkpoint A.
+
+        var secondA = runner.Prepare(null, "01-tag-entity");
+
+        Assert.Equal(2, secondA.Attempt);
+        Assert.True(secondA.BranchExists);
+    }
+
+    [Fact]
+    public async Task Prepare_after_state_loss_renumbers_from_the_vault_instead_of_reusing_the_verified_attempt()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+        new Orca.Core.Vault.VaultWriter(new Orca.Core.Vault.VaultLayout(_vault, "Plans")).WriteVerificationRecord(
+            new VerificationRecord(
+                1, "recipe-tagging", 1, "01-tag-entity", 1, DateTimeOffset.Parse("2026-07-07T10:00:00Z"),
+                new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+                [new SemanticCriterionResult("Tag entity exists", SemanticVerdict.Pass, null)],
+                VerificationVerdict.Pass, "Looks good.\n"));
+
+        // Simulate a second machine (or a wiped workspace): the local run-state cache is
+        // gone, but the vault's evidence of attempt 1 survives.
+        File.Delete(new RunStateStore(_repo.Root).PathFor("recipe-tagging"));
+
+        var preview = runner.Prepare(null, "01-tag-entity");
+
+        // Renumbered past the existing record, never reset to (and silently reusing) 1.
+        Assert.Equal(2, preview.Attempt);
+        Assert.True(preview.BranchExists);
+    }
+
+    [Fact]
+    public async Task Prepare_refuses_when_state_and_vault_disagree_about_this_checkpoints_attempt()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+
+        // The vault already has evidence of attempts 1 *and* 2 for this checkpoint (as if
+        // a second machine ran attempt 2 independently), but this machine's run state
+        // still only knows about attempt 1.
+        var writer = new Orca.Core.Vault.VaultWriter(new Orca.Core.Vault.VaultLayout(_vault, "Plans"));
+        writer.WriteVerificationRecord(new VerificationRecord(
+            1, "recipe-tagging", 1, "01-tag-entity", 1, DateTimeOffset.Parse("2026-07-07T10:00:00Z"),
+            new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+            [new SemanticCriterionResult("Tag entity exists", SemanticVerdict.Pass, null)],
+            VerificationVerdict.Pass, "Looks good.\n"));
+        writer.WriteVerificationRecord(new VerificationRecord(
+            1, "recipe-tagging", 1, "01-tag-entity", 2, DateTimeOffset.Parse("2026-07-08T10:00:00Z"),
+            new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+            [new SemanticCriterionResult("Tag entity exists", SemanticVerdict.Pass, null)],
+            VerificationVerdict.Pass, "Also fine.\n"));
+
+        var e = Assert.Throws<CheckpointRunException>(() => runner.Prepare(null, "01-tag-entity"));
+
+        Assert.Contains("attempt 2", e.Message);
+        Assert.Contains("attempt 3", e.Message);
+        Assert.Contains("second machine", e.Message);
+        Assert.Contains(".orca/state", e.Message);
     }
 
     [Fact]
