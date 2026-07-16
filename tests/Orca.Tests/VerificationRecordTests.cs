@@ -149,4 +149,49 @@ public class VerificationRecordTests
 
         Assert.Contains("attempt must be >= 1", ex.Message);
     }
+
+    [Fact]
+    public void Semantic_note_and_criterion_round_trip_every_line_separator()
+    {
+        var separators = new string([(char)0x0085, (char)0x2028, (char)0x2029]);
+        var criterion = $"criterion{separators}with separators";
+        var note = $"note{separators}with separators";
+
+        var record = new VerificationRecord(
+            1, "recipe-tagging", 1, "01-tag-entity", 1,
+            DateTimeOffset.Parse("2026-07-06T15:20:00Z"),
+            new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+            [new SemanticCriterionResult(criterion, SemanticVerdict.Pass, note)],
+            VerificationVerdict.Pass, "Body.\n");
+
+        var serialized = VerificationRecordSerializer.Serialize(record);
+        var parsed = VerificationRecordParser.Parse(serialized, "01-tag-entity.attempt-1.md");
+
+        Assert.Equal(criterion, parsed.Semantic![0].Criterion);
+        Assert.Equal(note, parsed.Semantic[0].Note);
+    }
+
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x01)]
+    [InlineData(0x1b)]
+    [InlineData(0x1f)]
+    [InlineData(0x80)]
+    [InlineData(0x9f)]
+    public void Other_c0_and_c1_controls_round_trip_in_a_semantic_note(int codePoint)
+    {
+        var note = $"note{(char)codePoint}with-control";
+
+        var record = new VerificationRecord(
+            1, "recipe-tagging", 1, "01-tag-entity", 1,
+            DateTimeOffset.Parse("2026-07-06T15:20:00Z"),
+            new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+            [new SemanticCriterionResult("criterion", SemanticVerdict.Pass, note)],
+            VerificationVerdict.Pass, "Body.\n");
+
+        var serialized = VerificationRecordSerializer.Serialize(record);
+        var parsed = VerificationRecordParser.Parse(serialized, "01-tag-entity.attempt-1.md");
+
+        Assert.Equal(note, parsed.Semantic![0].Note);
+    }
 }
