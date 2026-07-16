@@ -12,6 +12,8 @@ namespace Orca.Core.Execution;
 public sealed class RunLogWriter : IDisposable
 {
     private readonly StreamWriter _writer;
+    private readonly object _sync = new();
+    private bool _disposed;
 
     private RunLogWriter(StreamWriter writer)
     {
@@ -30,11 +32,18 @@ public sealed class RunLogWriter : IDisposable
         return new RunLogWriter(new StreamWriter(stream) { NewLine = "\n" });
     }
 
-    /// <summary>Appends one raw line exactly as received and flushes immediately.</summary>
+    /// <summary>Appends one raw line exactly as received and flushes immediately.
+    /// Serialized and dispose-safe (BF-06): an abandoned pump task racing disposal must
+    /// become a no-op, never a crash or interleaved bytes.</summary>
     public void WriteLine(string rawLine)
     {
-        _writer.WriteLine(rawLine);
-        _writer.Flush();
+        lock (_sync)
+        {
+            if (_disposed)
+                return;
+            _writer.WriteLine(rawLine);
+            _writer.Flush();
+        }
     }
 
     /// <summary>Appends an executor fact as <c>{"type":"orca_executor","subtype":…}</c>.
@@ -53,5 +62,12 @@ public sealed class RunLogWriter : IDisposable
         WriteLine(JsonSerializer.Serialize(payload));
     }
 
-    public void Dispose() => _writer.Dispose();
+    public void Dispose()
+    {
+        lock (_sync)
+        {
+            _disposed = true;
+            _writer.Dispose();
+        }
+    }
 }

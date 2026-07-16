@@ -14,8 +14,14 @@ namespace Orca.Core.Execution;
 /// decision: a logged-out machine fails loudly via the CLI's own
 /// <c>authentication_failed</c> event (exit 1, <c>result.is_error: true</c> — see the
 /// logged-out fixture).</para></summary>
-public sealed class ClaudeCodeExecutor : IClaudeExecutor
+public sealed class ClaudeCodeExecutor(TimeSpan? drainGrace = null) : IClaudeExecutor
 {
+    /// <summary>How long after process exit the pumps may keep draining before the
+    /// executor abandons them with a truncation note (BF-06): EOF requires every
+    /// inherited pipe handle to close, and a daemonized grandchild can hold them
+    /// forever. Overridable only for tests.</summary>
+    private readonly TimeSpan _drainGrace = drainGrace ?? TimeSpan.FromSeconds(10);
+
     /// <summary>Pre-flight ceiling on prompt size, enforced once at this choke point
     /// before any process is spawned or run-log file created. Prompts now travel over
     /// stdin (never argv), so there is no OS argv-length limit to lean on as a backstop;
@@ -46,6 +52,15 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             throw new ExecutorException($"working directory does not exist: {options.WorkingDirectory}");
 
         using var runLog = RunLogWriter.Create(logPaths.EventLog);
+
+        // BF-06 §3: the stderr file opens BEFORE the spawn — an unwritable path fails
+        // fast pre-billing instead of faulting the pump task mid-run (which left stderr
+        // undrained and could block the CLI on a full pipe until the wall-clock kill).
+        // FileMode.Create: a leftover *.stderr.txt from a crash is overwritten, not a
+        // reason to lose a billed run's result.
+        Directory.CreateDirectory(Path.GetDirectoryName(logPaths.Stderr)!);
+        using var stderrFile = new FileStream(
+            logPaths.Stderr, FileMode.Create, FileAccess.Write, FileShare.Read);
 
         var startInfo = new ProcessStartInfo
         {
@@ -163,9 +178,15 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
 
         var stderrTask = Task.Run(async () =>
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(logPaths.Stderr)!);
-            using var stderr = new FileStream(logPaths.Stderr, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-            await process.StandardError.BaseStream.CopyToAsync(stderr, CancellationToken.None);
+            try
+            {
+                await process.StandardError.BaseStream.CopyToAsync(stderrFile, CancellationToken.None);
+            }
+            catch (Exception e) when (e is ObjectDisposedException or IOException)
+            {
+                // An abandoned pump racing disposal after a truncated drain (BF-06) —
+                // the truncation note is already in the run log.
+            }
         }, CancellationToken.None);
 
         var timedOut = false;
@@ -192,10 +213,24 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             await process.WaitForExitAsync(CancellationToken.None);
         }
 
-        // Both pumps end at EOF once the process (and its descendants' pipe handles) are gone.
-        await stdinTask;
-        await stdoutTask;
-        await stderrTask;
+        // Both pumps end at EOF once the process and its descendants' pipe handles are
+        // gone — but a daemonized grandchild can hold the pipes open forever (BF-06), so
+        // the drain gets a grace window. On expiry the pumps are abandoned with a
+        // truncation note; RunLogWriter is dispose-safe, so their stragglers no-op.
+        var pumps = Task.WhenAll(stdinTask, stdoutTask, stderrTask);
+        if (await Task.WhenAny(pumps, Task.Delay(_drainGrace, CancellationToken.None)) == pumps)
+        {
+            await pumps;
+        }
+        else
+        {
+            runLog.WriteExecutorEvent("drain_truncated", new Dictionary<string, object?>
+            {
+                ["grace_ms"] = (long)_drainGrace.TotalMilliseconds,
+                ["note"] = "a child process kept stdout/stderr open after exit — remaining output not captured",
+            });
+        }
+
         stopwatch.Stop();
 
         if (timedOut)

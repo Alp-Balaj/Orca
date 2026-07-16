@@ -42,8 +42,15 @@ public sealed record GateCommandResult
 /// arrays, no shell — the <c>GitProcess</c> philosophy. Combined output streams to the
 /// run-log file line-by-line as it arrives, so a killed or hung gate still leaves its
 /// evidence on disk.</summary>
-public sealed class GateRunner(TimeSpan? timeout)
+public sealed class GateRunner(TimeSpan? timeout, TimeSpan? drainGrace = null)
 {
+    /// <summary>How long after process exit the output readers may keep draining before
+    /// the reads are cancelled with a truncation note (BF-06): EOF requires every
+    /// inherited pipe handle to close, and an `npm test`-style command that exits 0 but
+    /// leaves a watcher/daemon behind holds them forever — gateTimeout can't protect
+    /// here because the gate command itself exited fine. Overridable only for tests.</summary>
+    private readonly TimeSpan _drainGrace = drainGrace ?? TimeSpan.FromSeconds(10);
+
     /// <summary>Excerpt size for record bodies and Verifier prompts. Presentation, not
     /// policy — the full output is always in the run log.</summary>
     public const int TailLineCount = 60;
@@ -101,21 +108,57 @@ public sealed class GateRunner(TimeSpan? timeout)
                 }
             }
 
-            process.OutputDataReceived += (_, e) => Capture(e.Data);
-            process.ErrorDataReceived += (_, e) => Capture(e.Data);
+            // A null Data signals that stream's EOF — the drain-completion signal the
+            // bounded wait below needs (BF-06).
+            using var stdoutEof = new ManualResetEventSlim();
+            using var stderrEof = new ManualResetEventSlim();
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is null)
+                    stdoutEof.Set();
+                else
+                    Capture(e.Data);
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data is null)
+                    stderrEof.Set();
+                else
+                    Capture(e.Data);
+            };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
+            // Finite waits only: WaitForExit(-1) behaves like the parameterless
+            // overload and blocks on redirected-stream EOF — exactly the BF-06 hang.
             var timedOut = false;
-            var waitMs = timeout is { } ceiling ? (int)ceiling.TotalMilliseconds : -1;
-            if (!process.WaitForExit(waitMs))
+            var exitDeadline = timeout is { } ceiling ? stopwatch.Elapsed + ceiling : (TimeSpan?)null;
+            while (!process.WaitForExit(100))
             {
-                timedOut = true;
-                process.Kill(entireProcessTree: true);
+                if (exitDeadline is { } limit && stopwatch.Elapsed > limit)
+                {
+                    timedOut = true;
+                    process.Kill(entireProcessTree: true);
+                    break;
+                }
             }
 
-            // Unconditional wait drains the async output readers even after a kill.
-            process.WaitForExit();
+            // The old unconditional WaitForExit() here waited for stream EOF — which a
+            // surviving grandchild can withhold forever (BF-06). The direct process has
+            // exited (or been killed) above; the drain now gets a bounded grace, after
+            // which the reads are cancelled and the truncation is on the record.
+            process.WaitForExit(10_000);
+            var drainDeadline = Stopwatch.GetTimestamp() + (long)(_drainGrace.TotalSeconds * Stopwatch.Frequency);
+            int Remaining() => (int)Math.Max(0,
+                (drainDeadline - Stopwatch.GetTimestamp()) * 1000 / Stopwatch.Frequency);
+            var drained = stdoutEof.Wait(Remaining()) && stderrEof.Wait(Remaining());
+            if (!drained)
+            {
+                process.CancelOutputRead();
+                process.CancelErrorRead();
+                Capture($"[orca] gate '{gate}' output truncated — a child process kept the pipes open after exit (drain grace {_drainGrace.TotalSeconds:0}s)");
+            }
+
             stopwatch.Stop();
 
             lock (sink)
