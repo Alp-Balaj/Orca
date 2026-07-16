@@ -65,7 +65,8 @@ public class ClaudeCodeExecutorTests : IDisposable
             File.WriteAllText(cmd,
                 "@echo off\r\n" +
                 $"echo %* > \"{argvCapture}\"\r\n" +
-                $"more > \"{stdinCapture}\"\r\n" +
+                // `more` appends a trailing CRLF; capture stdin byte-for-byte instead.
+                $"powershell -NoProfile -Command \"[IO.File]::WriteAllText('{stdinCapture}', [Console]::In.ReadToEnd())\"\r\n" +
                 $"type \"{fixture}\"\r\n" +
                 $"exit /b {exitCode}\r\n");
             return cmd;

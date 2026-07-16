@@ -207,7 +207,14 @@ public sealed class GitWorkspaceTests : IDisposable
     {
         var workspace = Workspace();
         var linkPath = Path.Combine(_repo.Root, "broken-link");
-        File.CreateSymbolicLink(linkPath, Path.Combine(_repo.Root, "does-not-exist-target"));
+        try
+        {
+            File.CreateSymbolicLink(linkPath, Path.Combine(_repo.Root, "does-not-exist-target"));
+        }
+        catch (IOException)
+        {
+            return; // No SeCreateSymbolicLinkPrivilege (Windows without admin/Developer Mode).
+        }
 
         var diff = workspace.FullDiff();
 
