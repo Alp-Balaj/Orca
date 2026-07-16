@@ -73,7 +73,24 @@ internal sealed class SpectreCheckpointGate(bool interactive) : ICheckpointGate
 
         var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
             .Title($"Checkpoint [bold]{context.Preview.Checkpoint.Id.EscapeMarkup()}[/] — your call:")
-            .AddChoices("Approve — commit these changes", "Reject", "Defer — decide later"));
+            .AddChoices(
+                "Approve — commit these changes",
+                "Approve & mark complete",
+                "Reject",
+                "Defer — decide later"));
+
+        if (choice == "Approve & mark complete")
+        {
+            var markPlanComplete = context.IsLastCheckpoint && AnsiConsole.Prompt(new ConfirmationPrompt(
+                    "This is the last checkpoint in the plan — also mark the plan complete?")
+                { DefaultValue = true });
+            return Task.FromResult(new CheckpointDecision
+            {
+                Choice = CheckpointChoice.Approve,
+                MarkCheckpointComplete = true,
+                MarkPlanComplete = markPlanComplete,
+            });
+        }
 
         if (choice.StartsWith("Approve", StringComparison.Ordinal))
             return Task.FromResult(new CheckpointDecision { Choice = CheckpointChoice.Approve });

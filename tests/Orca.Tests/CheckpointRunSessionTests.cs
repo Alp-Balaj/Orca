@@ -1,4 +1,5 @@
 using Orca.Core.Config;
+using Orca.Core.Domain;
 using Orca.Core.Execution;
 using Orca.Core.Git;
 using Orca.Core.Run;
@@ -309,7 +310,80 @@ public sealed class CheckpointRunSessionTests : IDisposable
         Assert.NotNull(context.Verification!.Record);
         Assert.NotEmpty(context.StatusLines);
         Assert.Equal(0.75m, context.AttemptCostUsd);
+
+        // Single-checkpoint fixture plan: this checkpoint is trivially the last one.
+        Assert.True(context.IsLastCheckpoint);
+        // Approve-only never touches the plan file — the checkpoint stays pending.
+        Assert.Equal(CheckpointStatus.Pending, ReadPlan().Checkpoints[0].Status);
     }
+
+    [Fact]
+    public async Task Approve_and_mark_complete_flips_the_checkpoint_status_after_the_commit_succeeds()
+    {
+        CommitOrcaIgnore();
+        var gate = new ScriptedGate
+        {
+            Decision = new CheckpointDecision { Choice = CheckpointChoice.Approve, MarkCheckpointComplete = true },
+        };
+        var session = Session(GreenPipelineExecutor());
+
+        var result = await session.ExecuteAsync(session.Prepare(null, null), gate);
+
+        Assert.Equal(CheckpointSessionOutcome.Approved, result.Outcome);
+        Assert.Matches("^[0-9a-f]{40}$", result.CommitSha);
+        Assert.Equal(CheckpointStatus.Complete, ReadPlan().Checkpoints[0].Status);
+        // MarkPlanComplete was never set — the plan itself stays as it was.
+        Assert.Equal(PlanStatus.Approved, ReadPlan().Status);
+    }
+
+    [Fact]
+    public async Task Marking_the_last_checkpoint_complete_also_offers_flipping_the_plan_status()
+    {
+        CommitOrcaIgnore();
+        var gate = new ScriptedGate
+        {
+            Decision = new CheckpointDecision
+            {
+                Choice = CheckpointChoice.Approve,
+                MarkCheckpointComplete = true,
+                MarkPlanComplete = true,
+            },
+        };
+        var session = Session(GreenPipelineExecutor());
+
+        var result = await session.ExecuteAsync(session.Prepare(null, null), gate);
+
+        Assert.Equal(CheckpointSessionOutcome.Approved, result.Outcome);
+        // The gate was told this was the last checkpoint, which is what let it offer
+        // (and here, choose) flipping the plan's own status in the same edit.
+        Assert.True(gate.DecisionContext!.IsLastCheckpoint);
+        var plan = ReadPlan();
+        Assert.Equal(CheckpointStatus.Complete, plan.Checkpoints[0].Status);
+        Assert.Equal(PlanStatus.Complete, plan.Status);
+    }
+
+    [Fact]
+    public async Task A_failed_approve_never_applies_the_checkpoint_status_flip()
+    {
+        CommitOrcaIgnore();
+        var gate = new ScriptedGate
+        {
+            Decision = new CheckpointDecision { Choice = CheckpointChoice.Approve, MarkCheckpointComplete = true },
+            // Approve refuses to commit unless the workspace is on the checkpoint branch —
+            // switch away right before the runner acts on the decision (raw git, bypassing
+            // GitWorkspace's own clean-tree guard) so CheckpointRunner.Approve throws
+            // before the flip is ever reached.
+            BeforeDecisionReturns = () => _repo.Git("checkout", "main"),
+        };
+        var session = Session(GreenPipelineExecutor());
+        var preview = session.Prepare(null, null);
+
+        await Assert.ThrowsAsync<CheckpointRunException>(() => session.ExecuteAsync(preview, gate));
+
+        Assert.Equal(CheckpointStatus.Pending, ReadPlan().Checkpoints[0].Status);
+    }
+
+    private Plan ReadPlan() => new VaultReader(new VaultLayout(_vault, "Plans")).ReadPlan("recipe-tagging");
 
     [Fact]
     public async Task Reject_with_confirmed_discard_resets_through_the_runner()
@@ -506,6 +580,12 @@ public sealed class CheckpointRunSessionTests : IDisposable
         public bool? VerifyPendingAnswer { get; init; }
         public CheckpointDecision? Decision { get; init; }
 
+        /// <summary>Run immediately before DecideAsync returns its scripted decision — a
+        /// hook for tests that need to mutate the workspace between the decision moment
+        /// and the runner acting on it (e.g. simulating Approve finding an unexpected
+        /// branch).</summary>
+        public Action? BeforeDecisionReturns { get; init; }
+
         public List<string> Calls { get; } = [];
         public CheckpointDecisionContext? DiscardContext { get; private set; }
         public CheckpointDecisionContext? DecisionContext { get; private set; }
@@ -531,6 +611,7 @@ public sealed class CheckpointRunSessionTests : IDisposable
         {
             Calls.Add("decide");
             DecisionContext = context;
+            BeforeDecisionReturns?.Invoke();
             return Task.FromResult(Decision
                 ?? throw new InvalidOperationException("gate asked to decide without a scripted decision"));
         }

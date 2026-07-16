@@ -1,6 +1,8 @@
 using Orca.Core.Config;
+using Orca.Core.Domain;
 using Orca.Core.Execution;
 using Orca.Core.Git;
+using Orca.Core.Vault;
 
 namespace Orca.Core.Run;
 
@@ -36,10 +38,13 @@ public sealed record CheckpointSessionResult
 /// approval and rejection remain <see cref="CheckpointRunner"/> methods the session
 /// calls after the gate has spoken. Both front ends are thin callers of this class, so
 /// the sequence can no longer fork between them.</summary>
-public sealed class CheckpointRunSession(OrcaConfig config, GitWorkspace workspace, IClaudeExecutor executor)
+public sealed class CheckpointRunSession(
+    OrcaConfig config, GitWorkspace workspace, IClaudeExecutor executor, TimeProvider? clock = null)
 {
     private readonly CheckpointRunner _runner = new(config, workspace, executor);
     private readonly CheckpointVerifier _verifier = new(config, workspace, executor);
+    private readonly VaultLayout _layout = new(config.VaultRoot, config.PlansDir);
+    private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 
     /// <summary>Read-only; delegates to CheckpointRunner.Prepare. Front ends render the
     /// preview (and --dry-run stops here, exactly as today).</summary>
@@ -198,6 +203,24 @@ public sealed class CheckpointRunSession(OrcaConfig config, GitWorkspace workspa
         {
             case CheckpointChoice.Approve:
                 var sha = _runner.Approve(preview, attemptCostUsd);
+
+                // The flip is applied only once the commit itself has succeeded — a
+                // failed Approve throws before reaching here, so the plan file is
+                // never touched for a decision that didn't actually land.
+                if (decision.MarkCheckpointComplete)
+                {
+                    var isLastCheckpoint = preview.CheckpointIndex == preview.Plan.Checkpoints.Count - 1;
+                    CheckpointStatusEditor.SetStatus(
+                        _layout.PlanFile(preview.Plan.PlanId),
+                        preview.Checkpoint.Id,
+                        preview.Checkpoint.Status,
+                        CheckpointStatus.Complete,
+                        _clock.GetUtcNow(),
+                        decision.MarkPlanComplete && isLastCheckpoint
+                            ? new PlanStatusChange(preview.Plan.Status, PlanStatus.Complete)
+                            : null);
+                }
+
                 return new CheckpointSessionResult
                 {
                     Outcome = CheckpointSessionOutcome.Approved,
@@ -245,5 +268,6 @@ public sealed class CheckpointRunSession(OrcaConfig config, GitWorkspace workspa
         StatusLines = workspace.StatusLines(),
         DiffStat = workspace.DiffStat(),
         AttemptCostUsd = attemptCostUsd,
+        IsLastCheckpoint = preview.CheckpointIndex == preview.Plan.Checkpoints.Count - 1,
     };
 }

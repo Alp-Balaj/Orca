@@ -55,19 +55,35 @@ internal sealed class TuiCheckpointGate(Action flushPending) : ICheckpointGate
     public Task<CheckpointDecision> DecideAsync(CheckpointDecisionContext context, CancellationToken ct) =>
         OnUiThread(ct, () => Decide(context));
 
+    private enum GateChoice { Approve, ApproveAndComplete, Reject, Defer }
+
     private static CheckpointDecision Decide(CheckpointDecisionContext context)
     {
         var body = new List<StyledLine>(RunDecisionText.Describe(context));
         var choice = TuiModal.Ask($"checkpoint {context.Preview.Checkpoint.Id} — your call", body,
-            new TuiModal.Choice<CheckpointChoice>(Key.A, "a approve", CheckpointChoice.Approve),
-            new TuiModal.Choice<CheckpointChoice>(Key.R, "r reject", CheckpointChoice.Reject),
-            new TuiModal.Choice<CheckpointChoice>(Key.D, "d defer", CheckpointChoice.Defer));
+            new TuiModal.Choice<GateChoice>(Key.A, "a approve", GateChoice.Approve),
+            new TuiModal.Choice<GateChoice>(Key.C, "c approve & complete", GateChoice.ApproveAndComplete),
+            new TuiModal.Choice<GateChoice>(Key.R, "r reject", GateChoice.Reject),
+            new TuiModal.Choice<GateChoice>(Key.D, "d defer", GateChoice.Defer));
 
         return choice switch
         {
-            CheckpointChoice.Approve => new CheckpointDecision { Choice = CheckpointChoice.Approve },
+            GateChoice.Approve => new CheckpointDecision { Choice = CheckpointChoice.Approve },
+            GateChoice.ApproveAndComplete => new CheckpointDecision
+            {
+                Choice = CheckpointChoice.Approve,
+                MarkCheckpointComplete = true,
+                MarkPlanComplete = context.IsLastCheckpoint && TuiModal.Ask(
+                    "last checkpoint — also mark the plan complete?",
+                    [
+                        StyledLine.Plain("This is the last checkpoint in the plan.", TuiRole.Text),
+                        StyledLine.Plain("Also mark the plan complete?", TuiRole.Text),
+                    ],
+                    new TuiModal.Choice<bool>(Key.Y, "y mark plan complete", true),
+                    new TuiModal.Choice<bool>(Key.N, "n leave plan status", false)),
+            },
             // Reject chains the discard confirmation exactly as the CLI does — never automatic.
-            CheckpointChoice.Reject => new CheckpointDecision
+            GateChoice.Reject => new CheckpointDecision
             {
                 Choice = CheckpointChoice.Reject,
                 DiscardChanges = TuiModal.Ask(
