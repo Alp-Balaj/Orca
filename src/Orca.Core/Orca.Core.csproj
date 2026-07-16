@@ -11,6 +11,7 @@
     <EmbeddedResource Include="../../prompts/planner.md" LogicalName="Orca.Core.Prompts.planner.md" />
     <EmbeddedResource Include="../../prompts/reconciler.md" LogicalName="Orca.Core.Prompts.reconciler.md" />
     <EmbeddedResource Include="../../prompts/verifier.md" LogicalName="Orca.Core.Prompts.verifier.md" />
+    <EmbeddedResource Include="../../prompts/critic.md" LogicalName="Orca.Core.Prompts.critic.md" />
   </ItemGroup>
 
 </Project>

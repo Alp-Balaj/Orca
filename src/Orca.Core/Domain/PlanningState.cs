@@ -24,6 +24,11 @@ public enum PlanningRunStatus
 /// <see cref="StopReason"/> and is never retried automatically.</summary>
 public sealed record PlanningAttempt
 {
+    /// <summary>Which stage this invocation ran — "planner" for the single-candidate
+    /// path; multi-candidate stages are "candidate-<i>", "critic", "synthesis"
+    /// (SUG-13). Defaults to "planner" so old state deserializes unchanged.</summary>
+    public string Role { get; init; } = "planner";
+
     public required int Attempt { get; init; }
     public required InvocationStopReason StopReason { get; init; }
     public required string? ParseFailure { get; init; }
