@@ -243,7 +243,14 @@ verdicts, the working-tree diffstat, and the decision prompt:
   and comes straight back to this prompt without re-invoking anything.
 
 **4. Check where things stand** any time: `orca status --repo <repo>` — plan,
-checkpoints, latest verification verdict, accumulated cost.
+checkpoints, latest verification verdict, accumulated cost. Add `--tokens` for spend
+attribution (SUG-06): accumulated token usage by role (implementer/reconciler/verifier
+from run state, planner from planning state) with cache-hit ratios — the judges paying
+for the diff twice shows up here, not in a guess. Run state now accumulates usage per
+role instead of letting the last invocation win, and the session id / "last usage"
+fields are the Implementer's, never clobbered by a judge invocation (BF-07). An optional
+`maxPromptBytes` in orca.json refuses an oversized prompt at prepare time — before it is
+billed — for both checkpoint runs and planning.
 
 Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its own.
 
@@ -271,7 +278,7 @@ record from machine facts alone and spends nothing on the LLM roles.
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
                        [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
-    orca status [--plan <id>] [--repo <path>]
+    orca status [--plan <id>] [--tokens] [--repo <path>]
     orca ui [--repo <path>]
     orca                        (no arguments, on an interactive terminal — opens the TUI)
 

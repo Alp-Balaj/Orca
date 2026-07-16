@@ -83,7 +83,8 @@ public sealed class CheckpointRunnerTests : IDisposable
         string[]? deniedTools = null,
         int? maxParseRetries = 1,
         int? maxCheckpointAttempts = 3,
-        bool verificationRoles = true) => new()
+        bool verificationRoles = true,
+        int? maxPromptBytes = null) => new()
     {
         RepoConfigPath = Path.Combine(_repo.Root, "orca.json"),
         GlobalConfigPath = Path.Combine(_repo.Root, "global.json"),
@@ -95,6 +96,7 @@ public sealed class CheckpointRunnerTests : IDisposable
         GateTimeout = null,
         MaxParseRetries = maxParseRetries,
         MaxCheckpointAttempts = maxCheckpointAttempts,
+        MaxPromptBytes = maxPromptBytes,
         PlanningCandidates = null,
         DeniedTools = deniedTools ?? ["Bash(git push*)"],
         RoleSections = new RolesSection
@@ -724,5 +726,19 @@ public sealed class CheckpointRunnerTests : IDisposable
                 Elapsed = TimeSpan.FromSeconds(1.2),
             });
         }
+    }
+
+    [Fact]
+    public void A_prompt_above_the_configured_byte_ceiling_refuses_before_billing()
+    {
+        // SUG-06 §5: the budget preflight — a runaway prompt (huge child note, unbounded
+        // feedback) is caught at Prepare, not discovered on the bill.
+        var runner = new CheckpointRunner(
+            Config(maxPromptBytes: 64), GitWorkspace.Discover(_repo.Root), new FakeExecutor(_repo));
+
+        var ex = Assert.Throws<CheckpointRunException>(() => runner.Prepare(null, null));
+
+        Assert.Contains("maxPromptBytes=64", ex.Message);
+        Assert.Contains("before paying", ex.Message);
     }
 }

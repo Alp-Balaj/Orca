@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Orca.Core.Config;
 using Orca.Core.Domain;
 using Orca.Core.Git;
+using Orca.Core.Planning;
 using Orca.Core.Run;
 using Orca.Core.Vault;
 using Spectre.Console;
@@ -24,6 +25,10 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         [CommandOption("--repo <PATH>")]
         [Description("Target repo (any directory inside it). Defaults to the current directory.")]
         public string? Repo { get; init; }
+
+        [CommandOption("--tokens")]
+        [Description("Also show accumulated token usage by role — where the spend actually goes (SUG-06).")]
+        public bool Tokens { get; init; }
     }
 
     public override int Execute(CommandContext context, Settings settings)
@@ -88,7 +93,52 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             runTable.AddRow("last usage", $"in {usage.InputTokens}, out {usage.OutputTokens}, cache read {usage.CacheReadInputTokens}");
         runTable.AddRow("started / updated", $"{state.StartedAt:u} / {state.UpdatedAt:u}");
         AnsiConsole.Write(new Panel(runTable).Header("run state"));
+
+        if (settings.Tokens)
+            RenderTokens(state, new PlanningStateStore(workspace.RepoRoot).Read(planId));
+
         return 0;
+    }
+
+    /// <summary>SUG-06 §2: spend attribution — accumulated usage per role from run
+    /// state, plus the planning-side roles from planning state. Cache-hit is
+    /// cache-read / (input + cache-read): how much of what the model read was already
+    /// cached rather than re-paid at full input rate.</summary>
+    private static void RenderTokens(RunState state, PlanningState? planning)
+    {
+        var table = new Table().AddColumns("role", "input", "output", "cache write", "cache read", "cache hit");
+
+        foreach (var (role, usage) in (state.UsageByRole ?? new Dictionary<string, TokenUsage>())
+                 .OrderBy(p => p.Key, StringComparer.Ordinal))
+            AddUsageRow(table, role, usage);
+
+        // Planning-side roles accumulate from their attempt history.
+        foreach (var group in (planning?.Attempts ?? [])
+                 .Where(a => a.Usage is not null)
+                 .GroupBy(a => a.Role, StringComparer.Ordinal)
+                 .OrderBy(g => g.Key, StringComparer.Ordinal))
+            AddUsageRow(table, group.Key, group.Aggregate(TokenUsage.Zero, (sum, a) => sum.Plus(a.Usage!)));
+
+        if (table.Rows.Count == 0)
+        {
+            AnsiConsole.MarkupLine("no per-role usage recorded yet — it accumulates from the next invocation on.");
+            return;
+        }
+
+        AnsiConsole.Write(new Panel(table).Header("tokens by role (accumulated)"));
+    }
+
+    private static void AddUsageRow(Table table, string role, TokenUsage usage)
+    {
+        var readable = usage.InputTokens + usage.CacheReadInputTokens;
+        var hit = readable == 0 ? "—" : $"{100.0 * usage.CacheReadInputTokens / readable:0}%";
+        table.AddRow(
+            role.EscapeMarkup(),
+            usage.InputTokens.ToString("N0"),
+            usage.OutputTokens.ToString("N0"),
+            usage.CacheCreationInputTokens.ToString("N0"),
+            usage.CacheReadInputTokens.ToString("N0"),
+            hit);
     }
 
     private static string SchemaYaml(GateOutcome outcome) =>

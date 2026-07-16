@@ -234,7 +234,7 @@ public sealed class CheckpointRunner(
             PendingDecision = pendingDecision,
             Prompt = prompt,
             PromptSha256 = CheckpointPrompt.Sha256(prompt),
-            PromptBytes = Encoding.UTF8.GetByteCount(prompt),
+            PromptBytes = PreflightPromptBytes(prompt, checkpoint.Id),
             Options = options,
             Argv = ClaudeArguments.Build(options),
             SettingsJson = settingsJson,
@@ -366,6 +366,20 @@ public sealed class CheckpointRunner(
     /// <see cref="CheckpointCommitMessage.Build"/> writes for this exact plan/checkpoint —
     /// how the two Prepare guards above recognize a real human approval rather than any
     /// commit that merely happens to sit at a checkpoint branch's head.</summary>
+    /// <summary>SUG-06 §5: the budget preflight — refuse a prompt above the configured
+    /// maxPromptBytes ceiling BEFORE anything is billed (the executor's hard stdin
+    /// ceiling still backstops delivery). Returns the byte count for the preview.</summary>
+    private int PreflightPromptBytes(string prompt, string checkpointId)
+    {
+        var bytes = Encoding.UTF8.GetByteCount(prompt);
+        if (config.MaxPromptBytes is { } ceiling && bytes > ceiling)
+            throw new CheckpointRunException(
+                $"checkpoint '{checkpointId}''s assembled prompt is {bytes} bytes, above the configured " +
+                $"maxPromptBytes={ceiling} — trim the plan section/child note/feedback (or raise the ceiling " +
+                $"in {config.RepoConfigPath}) before paying for this invocation");
+        return bytes;
+    }
+
     private static bool IsApprovalCommit(string? commitSubject, string planId, string checkpointId) =>
         commitSubject is not null
         && commitSubject.StartsWith($"orca: {planId}/{checkpointId} attempt ", StringComparison.Ordinal);

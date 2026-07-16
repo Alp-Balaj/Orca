@@ -87,6 +87,14 @@ public sealed class SingleCandidatePlanningStrategy(
                 : _logLayout.PlanningSettingsFile(request.PlanId, attempt),
         };
 
+        // SUG-06 §5: same budget preflight as checkpoint prompts — refuse before billing.
+        var promptBytes = System.Text.Encoding.UTF8.GetByteCount(prompt);
+        if (config.MaxPromptBytes is { } ceiling && promptBytes > ceiling)
+            throw new PlanningException(
+                $"the assembled Planner prompt is {promptBytes} bytes, above the configured " +
+                $"maxPromptBytes={ceiling} — trim the goal brief (or raise the ceiling in " +
+                $"{config.RepoConfigPath}) before paying for this invocation");
+
         return new PlanningPreview
         {
             Request = request,
@@ -179,6 +187,7 @@ public sealed class SingleCandidatePlanningStrategy(
                 ParseFailure = parseFailure,
                 SessionId = execution.SessionId,
                 CostUsd = execution.Result?.TotalCostUsd ?? 0m,
+                Usage = execution.Result?.Usage,
                 PromptSha256 = CheckpointPrompt.Sha256(prompt),
                 StartedAt = startedAt,
                 EndedAt = endedAt,
