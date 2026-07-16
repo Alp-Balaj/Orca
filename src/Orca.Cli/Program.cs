@@ -17,6 +17,10 @@ app.Configure(config =>
         .WithDescription("Have the Planner write a draft plan into the vault from your goal brief (one scoped claude invocation, capped parse retries).");
     config.AddCommand<CheckpointRunCommand>("checkpoint-run")
         .WithDescription("Run one checkpoint (one scoped claude invocation), then stop for your approve/reject decision.");
+    config.AddCommand<PlanApproveCommand>("plan-approve")
+        .WithDescription("Approve a draft plan (status: draft → approved) via the surgical frontmatter editor — no source-mode YAML edit.");
+    config.AddCommand<CheckpointCompleteCommand>("checkpoint-complete")
+        .WithDescription("Mark a checkpoint complete (evidence-guarded) or re-open it with --reopen — no source-mode YAML edit.");
     config.AddCommand<StatusCommand>("status")
         .WithDescription("Show the plan's checkpoints and the current run state.");
     config.AddCommand<UiCommand>("ui")

@@ -3,8 +3,10 @@ using Orca.Core.Domain;
 namespace Orca.Core.Vault;
 
 /// <summary>The YAML spellings of every schema enum. Parsing is exact-match and fail-loud;
-/// the ToYaml overloads are the single source of truth for how values are written back.</summary>
-internal static class SchemaEnums
+/// the ToYaml overloads are the single source of truth for how values are written back
+/// (the two status overloads are public so front-end messages spell statuses the way the
+/// plan file does; parsing stays internal to the vault layer).</summary>
+public static class SchemaEnums
 {
     internal static PlanStatus ParsePlanStatus(string value, string filePath) => value switch
     {
@@ -72,7 +74,7 @@ internal static class SchemaEnums
             $"invalid implements_plan '{value}' (expected full|partial|none)"),
     };
 
-    internal static string ToYaml(PlanStatus value) => value switch
+    public static string ToYaml(PlanStatus value) => value switch
     {
         PlanStatus.Draft => "draft",
         PlanStatus.Approved => "approved",
@@ -82,7 +84,7 @@ internal static class SchemaEnums
         _ => "abandoned",
     };
 
-    internal static string ToYaml(CheckpointStatus value) => value switch
+    public static string ToYaml(CheckpointStatus value) => value switch
     {
         CheckpointStatus.Pending => "pending",
         CheckpointStatus.InProgress => "in_progress",
