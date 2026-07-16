@@ -24,6 +24,24 @@ public sealed record PlanningRequest
 
     public required string TargetRepoName { get; init; }
     public required string BaseBranch { get; init; }
+
+    /// <summary>SUG-01: skip the Scout stage even when <c>roles.scout</c> is configured —
+    /// goal-only planning for greenfield repos (the CLI's <c>--no-scout</c>).</summary>
+    public bool NoScout { get; init; }
+}
+
+/// <summary>Everything the Scout stage of one planning run would do (SUG-01) — non-null
+/// on <see cref="PlanningPreview.Scout"/> exactly when the stage will run.</summary>
+public sealed record ScoutStagePreview
+{
+    public required string AuditFilePath { get; init; }
+    public required int Attempt { get; init; }
+    public required string Prompt { get; init; }
+    public required string PromptSha256 { get; init; }
+    public required ClaudeInvocationOptions Options { get; init; }
+    public required IReadOnlyList<string> Argv { get; init; }
+    public required string? SettingsJson { get; init; }
+    public required RunLogPaths LogPaths { get; init; }
 }
 
 /// <summary>Everything one planning run would do, computed without mutating anything —
@@ -53,6 +71,17 @@ public sealed record PlanningPreview
     public required IReadOnlyList<string> Argv { get; init; }
     public required string? SettingsJson { get; init; }
     public required RunLogPaths LogPaths { get; init; }
+
+    /// <summary>SUG-01: the Scout stage this run will perform first, or null with
+    /// <see cref="ScoutSkipReason"/> saying why not. When the stage runs, the Planner
+    /// prompt is re-assembled after it with the audit embedded — <see cref="Prompt"/>
+    /// here is the goal-only assembly. Not <c>required</c>: preview fixtures that
+    /// predate the Scout keep building.</summary>
+    public ScoutStagePreview? Scout { get; init; }
+
+    /// <summary>Why the Scout stage will not run: "roles.scout is not configured",
+    /// "--no-scout", or "audit already exists — reusing it". Null when it runs.</summary>
+    public string? ScoutSkipReason { get; init; }
 }
 
 /// <summary>How one planning run ended. <see cref="Plan"/> is non-null iff

@@ -24,6 +24,10 @@ public enum PlanningRunStatus
 /// <see cref="StopReason"/> and is never retried automatically.</summary>
 public sealed record PlanningAttempt
 {
+    /// <summary>Which role this invocation ran — "planner" or "scout" (SUG-01). Defaults
+    /// to "planner" so state written before the Scout existed deserializes unchanged.</summary>
+    public string Role { get; init; } = "planner";
+
     public required int Attempt { get; init; }
     public required InvocationStopReason StopReason { get; init; }
     public required string? ParseFailure { get; init; }

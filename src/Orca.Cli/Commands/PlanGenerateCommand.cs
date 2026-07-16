@@ -41,6 +41,10 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
         [Description("Planning strategy. Omit to choose interactively; never auto-decided.")]
         public string? Strategy { get; init; }
 
+        [CommandOption("--no-scout")]
+        [Description("Skip the Scout stage even when roles.scout is configured — plan from the goal brief alone (SUG-01).")]
+        public bool NoScout { get; init; }
+
         [CommandOption("--dry-run")]
         [Description("Print the assembled prompt and exact claude argv without mutating anything.")]
         public bool DryRun { get; init; }
@@ -75,6 +79,7 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
             Title = settings.Title,
             TargetRepoName = Path.GetFileName(workspace.RepoRoot),
             BaseBranch = settings.BaseBranch,
+            NoScout = settings.NoScout,
         };
 
         var strategy = new SingleCandidatePlanningStrategy(config, new ClaudeCodeExecutor(), workspace.RepoRoot);
@@ -153,6 +158,11 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
         var table = new Table().HideHeaders().Border(TableBorder.None).AddColumns("k", "v");
         table.AddRow("plan", preview.Request.PlanId.EscapeMarkup());
         table.AddRow("strategy", "single_candidate");
+        // SUG-01: the Scout stage is part of what the human authorizes — show it.
+        if (preview.Scout is { } scout)
+            table.AddRow("scout", $"runs first (attempt {scout.Attempt}, model {scout.Options.Model ?? "CLI default"}) — audit to {scout.AuditFilePath}".EscapeMarkup());
+        else
+            table.AddRow("scout", (preview.ScoutSkipReason ?? "(skipped)").EscapeMarkup());
         table.AddRow("attempt", preview.Attempt.ToString());
         table.AddRow("writes into", Path.Combine(config.VaultRoot, config.PlansDir).EscapeMarkup());
         table.AddRow("plan file", preview.RelativePlanPath.EscapeMarkup());
@@ -168,6 +178,14 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
 
     private static void RenderDryRun(PlanningPreview preview)
     {
+        if (preview.Scout is { } scout)
+        {
+            AnsiConsole.Write(new Panel(string.Join('\n', scout.Argv).EscapeMarkup())
+                .Header("scout argv (runs first; the Planner prompt below gains its audit)"));
+            AnsiConsole.Write(new Panel(scout.Prompt.EscapeMarkup())
+                .Header($"scout prompt (sha256 {scout.PromptSha256[..12]})"));
+        }
+
         AnsiConsole.Write(new Panel(string.Join('\n', preview.Argv).EscapeMarkup())
             .Header("argv (one element per line, passed verbatim — dry run, nothing executed)"));
         if (preview.SettingsJson is not null)

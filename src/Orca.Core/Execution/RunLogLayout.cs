@@ -81,6 +81,32 @@ public sealed class RunLogLayout
         return Path.Combine(RunsRoot, planId, $"planning.attempt-{attempt}.settings.json");
     }
 
+    /// <summary>Log paths for one Scout invocation (SUG-01) — same directory,
+    /// <c>scouting</c> stem so scout and planner attempts never collide.</summary>
+    public RunLogPaths ScoutAttemptPaths(string planId, int attempt)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+
+        var stem = $"scouting.attempt-{attempt}";
+        return new RunLogPaths
+        {
+            EventLog = Path.Combine(RunsRoot, planId, stem + ".ndjson"),
+            Stderr = Path.Combine(RunsRoot, planId, stem + ".stderr.txt"),
+        };
+    }
+
+    /// <summary>The <c>--settings</c> evidence file for one Scout invocation.</summary>
+    public string ScoutSettingsFile(string planId, int attempt)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+
+        return Path.Combine(RunsRoot, planId, $"scouting.attempt-{attempt}.settings.json");
+    }
+
     /// <summary>Combined stdout+stderr capture of one deterministic gate command —
     /// <c>&lt;checkpoint-id&gt;.attempt-&lt;n&gt;.build.txt</c> / <c>….tests.txt</c>.</summary>
     public string GateOutputFile(string planId, string checkpointId, int attempt, string gate)

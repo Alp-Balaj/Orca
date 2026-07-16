@@ -1,6 +1,7 @@
 using Orca.Core.Config;
 using Orca.Core.Domain;
 using Orca.Core.Execution;
+using Orca.Core.Git;
 using Orca.Core.Run;
 using Orca.Core.Vault;
 
@@ -60,19 +61,69 @@ public sealed class SingleCandidatePlanningStrategy(
                     $"planning state for '{request.PlanId}' was created by the '{SchemaEnums.ToYaml(s)}' strategy — refusing to resume it with '{SchemaEnums.ToYaml(Kind)}'");
         }
 
-        var attempt = NextFreeAttempt(request.PlanId, (state?.Attempts.Count ?? 0) + 1);
+        var attempt = NextFreeAttempt(
+            request.PlanId, (state?.Attempts.Count(a => a.Role == "planner") ?? 0) + 1);
 
         // A resumed run whose last attempt produced an unparseable file re-enters the
         // retry conversation; any other resume (rate limit, auth, timeout) starts the
         // prompt fresh — there is nothing to correct, only quota/credentials to restore.
         var relativePlanPath = $"{config.PlansDir}/{request.PlanId}/{request.PlanId}.md";
         var timestamp = $"{_clock.GetUtcNow().ToUniversalTime():yyyy-MM-ddTHH:mm:ss}Z";
-        var lastParseFailure = state is { Attempts: [.., { ParseFailure: { } failure }] } ? failure : null;
-        var prompt = lastParseFailure is null
-            ? PlannerPrompt.AssembleInitial(request, relativePlanPath, timestamp)
-            : PlannerPrompt.AssembleRetry(request, relativePlanPath, timestamp, lastParseFailure);
+        var lastParseFailure = state?.Attempts.LastOrDefault(a => a.Role == "planner")?.ParseFailure;
 
         var settingsJson = config.DeniedTools.Count > 0 ? PermissionSettings.ToJson(config.DeniedTools) : null;
+
+        // SUG-01: decide the Scout stage. An already-valid audit (a resume, or a re-plan
+        // after correcting the audit by hand) is reused — never re-paid; a missing or
+        // invalid one is (re)scouted when the role is configured and not opted out.
+        var auditPath = _layout.AuditFile(request.PlanId);
+        var auditBody = TryReadAuditBody(auditPath);
+        ScoutStagePreview? scout = null;
+        string? scoutSkip;
+        if (request.NoScout)
+            scoutSkip = "--no-scout — planning from the goal brief alone";
+        else if (config.RoleSections.Scout is null)
+            scoutSkip = "roles.scout is not configured — planning from the goal brief alone";
+        else if (auditBody is not null)
+            scoutSkip = $"audit already exists — reusing {auditPath}";
+        else
+        {
+            scoutSkip = null;
+            var scoutRole = config.GetRole(RoleName.Scout);
+            var scoutAttempt = NextFreeScoutAttempt(
+                request.PlanId, (state?.Attempts.Count(a => a.Role == "scout") ?? 0) + 1);
+            var scoutPrompt = ScoutPrompt.AssembleInitial(request, auditPath, timestamp);
+            var scoutOptions = new ClaudeInvocationOptions
+            {
+                Prompt = scoutPrompt,
+                WorkingDirectory = targetRepoRoot,
+                AllowedTools = scoutRole.AllowedTools,
+                MaxTurns = scoutRole.MaxTurns,
+                Timeout = scoutRole.Timeout,
+                Model = scoutRole.Model,
+                MaxBudgetUsd = scoutRole.MaxBudgetUsd,
+                SettingsFilePath = settingsJson is null
+                    ? null
+                    : _logLayout.ScoutSettingsFile(request.PlanId, scoutAttempt),
+            };
+            scout = new ScoutStagePreview
+            {
+                AuditFilePath = auditPath,
+                Attempt = scoutAttempt,
+                Prompt = scoutPrompt,
+                PromptSha256 = CheckpointPrompt.Sha256(scoutPrompt),
+                Options = scoutOptions,
+                Argv = ClaudeArguments.Build(scoutOptions),
+                SettingsJson = settingsJson,
+                LogPaths = _logLayout.ScoutAttemptPaths(request.PlanId, scoutAttempt),
+            };
+        }
+
+        // With the audit in hand now (reuse path) it is embedded here; when the Scout
+        // stage runs, GenerateAsync re-assembles the Planner prompt after it succeeds.
+        var prompt = lastParseFailure is null
+            ? PlannerPrompt.AssembleInitial(request, relativePlanPath, timestamp, auditBody)
+            : PlannerPrompt.AssembleRetry(request, relativePlanPath, timestamp, lastParseFailure, auditBody);
         var options = new ClaudeInvocationOptions
         {
             Prompt = prompt,
@@ -103,6 +154,8 @@ public sealed class SingleCandidatePlanningStrategy(
             Argv = ClaudeArguments.Build(options),
             SettingsJson = settingsJson,
             LogPaths = _logLayout.PlanningAttemptPaths(request.PlanId, attempt),
+            Scout = scout,
+            ScoutSkipReason = scoutSkip,
         };
     }
 
@@ -135,6 +188,23 @@ public sealed class SingleCandidatePlanningStrategy(
         var options = preview.Options;
         var logPaths = preview.LogPaths;
         var parseFailuresThisRun = 0;
+
+        // SUG-01: the Scout stage runs first when planned. Its audit body then rides
+        // every Planner assembly of this run (including §5.4 retries below).
+        var auditBody = TryReadAuditBody(_layout.AuditFile(request.PlanId));
+        if (preview.Scout is { } scoutStage)
+        {
+            var (scoutState, scoutFailure, scoutedBody) =
+                await RunScoutAsync(scoutStage, preview, state, observer, cancellationToken);
+            state = scoutState;
+            if (scoutFailure is not null)
+                return scoutFailure;
+
+            auditBody = scoutedBody;
+            prompt = PlannerPrompt.AssembleInitial(
+                request, preview.RelativePlanPath, preview.RequestedTimestamp, auditBody);
+            options = options with { Prompt = prompt };
+        }
 
         while (true)
         {
@@ -214,7 +284,7 @@ public sealed class SingleCandidatePlanningStrategy(
             attempt = NextFreeAttempt(request.PlanId, attempt + 1);
             observer?.OnRunEvent(new RunObservation.RoleParseRetry(RoleName.Planner, parseFailure, attempt));
             prompt = PlannerPrompt.AssembleRetry(
-                request, preview.RelativePlanPath, preview.RequestedTimestamp, parseFailure);
+                request, preview.RelativePlanPath, preview.RequestedTimestamp, parseFailure, auditBody);
             logPaths = _logLayout.PlanningAttemptPaths(request.PlanId, attempt);
             options = options with
             {
@@ -224,6 +294,170 @@ public sealed class SingleCandidatePlanningStrategy(
                     : _logLayout.PlanningSettingsFile(request.PlanId, attempt),
             };
         }
+    }
+
+    /// <summary>The audit body when a valid audit note exists at <paramref name="auditPath"/>,
+    /// else null — a missing file and an invalid one both mean "no usable audit" here
+    /// (the invalid one gets re-scouted; Prepare/GenerateAsync never crash on it).</summary>
+    private static string? TryReadAuditBody(string auditPath)
+    {
+        if (!File.Exists(auditPath))
+            return null;
+        try
+        {
+            return AuditNoteParser.Parse(File.ReadAllText(auditPath), auditPath).Body;
+        }
+        catch (VaultException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The Scout stage (SUG-01): invoke against the target repo, verify the repo
+    /// came through byte-for-byte untouched, parse the audit under the §5.4 retry
+    /// ceiling. Returns the updated state plus either a failure outcome (loud stop, never
+    /// auto-retried) or the audit body for the Planner.</summary>
+    private async Task<(PlanningState State, PlanningOutcome? Failure, string? AuditBody)> RunScoutAsync(
+        ScoutStagePreview stage,
+        PlanningPreview preview,
+        PlanningState state,
+        IRunObserver? observer,
+        CancellationToken cancellationToken)
+    {
+        var request = preview.Request;
+        var hashes = state.PromptFileHashes.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        hashes["scout"] = ScoutPrompt.RoleSha256;
+        _stateStore.Write(state = state with { PromptFileHashes = hashes });
+
+        var workspace = GitWorkspace.Discover(targetRepoRoot);
+
+        var scoutAttempt = stage.Attempt;
+        var scoutPrompt = stage.Prompt;
+        var scoutOptions = stage.Options;
+        var scoutLogPaths = stage.LogPaths;
+        var parseFailuresThisRun = 0;
+
+        while (true)
+        {
+            if (scoutOptions.SettingsFilePath is { } settingsPath)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+                File.WriteAllText(settingsPath, stage.SettingsJson!);
+            }
+
+            // Captured immediately before the invocation so the fingerprint brackets
+            // exactly what the Scout did — not Orca's own gitignored .orca/ writes.
+            var treeBefore = workspace.WorkingTreeHash();
+
+            observer?.OnRunEvent(new RunObservation.RoleStarted(
+                RoleName.Scout, scoutAttempt, scoutAttempt, scoutLogPaths.EventLog));
+            var startedAt = _clock.GetUtcNow();
+            var execution = await executor.ExecuteAsync(scoutOptions, scoutLogPaths,
+                observer is null ? null : new RoleStreamForwarder(observer, RoleName.Scout),
+                cancellationToken);
+            var endedAt = _clock.GetUtcNow();
+            observer?.OnRunEvent(new RunObservation.RoleFinished(RoleName.Scout, execution));
+            var stopReason = execution.StopReason;
+
+            string? parseFailure = null;
+            string? auditBody = null;
+            if (stopReason == InvocationStopReason.Succeeded)
+            {
+                // The structural guard behind "no Write on the repo": the Scout's tools
+                // can't be path-scoped on CLI 2.1.201, so the tree fingerprint is the
+                // enforcement — any repo mutation fails the stage loudly, never rides.
+                if (workspace.WorkingTreeHash() != treeBefore)
+                {
+                    state = Record(state, ScoutAttempt(
+                        scoutAttempt, stopReason, "the Scout modified the target repository", execution,
+                        scoutPrompt, startedAt, endedAt), endedAt);
+                    _stateStore.Write(state = state with { Status = PlanningRunStatus.Failed });
+                    return (state, Outcome(state, preview, plan: null, execution,
+                        $"the Scout modified the target repository at {targetRepoRoot} — it is read-only by contract. " +
+                        "Inspect `git status` there, clean up, and re-run plan-generate."), null);
+                }
+
+                if (!File.Exists(stage.AuditFilePath))
+                {
+                    parseFailure = $"the Scout wrote no file at {stage.AuditFilePath}";
+                }
+                else
+                {
+                    try
+                    {
+                        auditBody = AuditNoteParser.Parse(
+                            File.ReadAllText(stage.AuditFilePath), stage.AuditFilePath).Body;
+                    }
+                    catch (VaultException e)
+                    {
+                        parseFailure = e.Message;
+                    }
+                }
+            }
+
+            state = Record(state, ScoutAttempt(
+                scoutAttempt, stopReason, parseFailure, execution, scoutPrompt, startedAt, endedAt), endedAt);
+
+            if (stopReason != InvocationStopReason.Succeeded)
+            {
+                _stateStore.Write(state = state with { Status = PlanningRunStatus.Failed });
+                return (state, Outcome(state, preview, plan: null, execution,
+                    execution.Result?.ResultText is { Length: > 0 } text ? text : null), null);
+            }
+
+            if (parseFailure is null)
+            {
+                _stateStore.Write(state);
+                observer?.OnRunEvent(new RunObservation.VaultRecordWritten("audit", stage.AuditFilePath));
+                return (state, null, auditBody);
+            }
+
+            parseFailuresThisRun++;
+            if (parseFailuresThisRun > preview.MaxParseRetries)
+            {
+                _stateStore.Write(state = state with { Status = PlanningRunStatus.Failed });
+                return (state, Outcome(state, preview, plan: null, execution,
+                    $"the Scout's output failed parse/validation {parseFailuresThisRun} time(s), exhausting " +
+                    $"maxParseRetries={preview.MaxParseRetries}; last error: {parseFailure}"), null);
+            }
+
+            _stateStore.Write(state);
+            scoutAttempt = NextFreeScoutAttempt(request.PlanId, scoutAttempt + 1);
+            observer?.OnRunEvent(new RunObservation.RoleParseRetry(RoleName.Scout, parseFailure, scoutAttempt));
+            scoutPrompt = ScoutPrompt.AssembleRetry(
+                request, stage.AuditFilePath, preview.RequestedTimestamp, parseFailure);
+            scoutLogPaths = _logLayout.ScoutAttemptPaths(request.PlanId, scoutAttempt);
+            scoutOptions = scoutOptions with
+            {
+                Prompt = scoutPrompt,
+                SettingsFilePath = scoutOptions.SettingsFilePath is null
+                    ? null
+                    : _logLayout.ScoutSettingsFile(request.PlanId, scoutAttempt),
+            };
+        }
+    }
+
+    private static PlanningAttempt ScoutAttempt(
+        int attempt, InvocationStopReason stopReason, string? parseFailure,
+        ClaudeExecutionResult execution, string prompt, DateTimeOffset startedAt, DateTimeOffset endedAt) => new()
+    {
+        Role = "scout",
+        Attempt = attempt,
+        StopReason = stopReason,
+        ParseFailure = parseFailure,
+        SessionId = execution.SessionId,
+        CostUsd = execution.Result?.TotalCostUsd ?? 0m,
+        PromptSha256 = CheckpointPrompt.Sha256(prompt),
+        StartedAt = startedAt,
+        EndedAt = endedAt,
+    };
+
+    private int NextFreeScoutAttempt(string planId, int minimum)
+    {
+        var attempt = minimum;
+        while (File.Exists(_logLayout.ScoutAttemptPaths(planId, attempt).EventLog))
+            attempt++;
+        return attempt;
     }
 
     private Plan ParseAndValidate(PlanningPreview preview, PlanningRequest request)

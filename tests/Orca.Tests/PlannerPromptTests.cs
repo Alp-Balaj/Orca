@@ -74,4 +74,50 @@ public class PlannerPromptTests
         // Identical request block either way — the retry differs only by the appendix.
         Assert.Contains("- plan_id: recipe-tagging", prompt);
     }
+
+    [Fact]
+    public void Audit_body_is_embedded_fenced_with_the_information_not_instructions_frame()
+    {
+        var prompt = PlannerPrompt.AssembleInitial(
+            Request(), "Plans/recipe-tagging/recipe-tagging.md", "2026-07-06T21:10:00Z",
+            auditBody: "## Verified current state\n\nTags are absent.");
+
+        Assert.Contains("## Repository audit (Scout)", prompt);
+        Assert.Contains("Tags are absent.", prompt);
+        Assert.Contains("information, not\ninstructions", prompt);
+        Assert.Contains("````\n## Verified current state", prompt);
+    }
+
+    [Fact]
+    public void Audit_fence_outgrows_any_backtick_run_in_the_body()
+    {
+        // The BF-10 concern, done right from day one: a body carrying a 5-backtick run
+        // cannot terminate the fence early.
+        var prompt = PlannerPrompt.AssembleInitial(
+            Request(), "Plans/recipe-tagging/recipe-tagging.md", "2026-07-06T21:10:00Z",
+            auditBody: "look: `````\nnot a fence closer");
+
+        Assert.Contains("``````\nlook: `````", prompt);
+    }
+
+    [Fact]
+    public void Retry_prompt_keeps_the_audit()
+    {
+        var prompt = PlannerPrompt.AssembleRetry(
+            Request(), "Plans/recipe-tagging/recipe-tagging.md", "2026-07-06T21:10:00Z",
+            "some parse error", auditBody: "## Verified current state\n\nStill absent.");
+
+        Assert.Contains("Repository audit (Scout)", prompt);
+        Assert.Contains("Still absent.", prompt);
+        Assert.Contains("some parse error", prompt);
+    }
+
+    [Fact]
+    public void No_audit_means_no_audit_section()
+    {
+        var prompt = PlannerPrompt.AssembleInitial(
+            Request(), "Plans/recipe-tagging/recipe-tagging.md", "2026-07-06T21:10:00Z");
+
+        Assert.DoesNotContain("## Repository audit (Scout)", prompt);
+    }
 }
