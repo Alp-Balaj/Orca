@@ -28,6 +28,12 @@ public sealed record CheckpointSessionResult
     public bool DiscardedChanges { get; init; }
     public bool AutoDeferred { get; init; }
     public decimal? AttemptCostUsd { get; init; }
+
+    /// <summary>Set on every human decision (Approve/Reject/Defer, never on the earlier
+    /// non-decision outcomes) — <see cref="NextStepAdvice"/> computed from the plan as it
+    /// stands right after the decision, so an Approve-and-mark-complete's status flip is
+    /// already reflected.</summary>
+    public string? NextStep { get; init; }
 }
 
 /// <summary>One human-triggered checkpoint session, start to decision. Owns the exact
@@ -48,8 +54,10 @@ public sealed class CheckpointRunSession(
 
     /// <summary>Read-only; delegates to CheckpointRunner.Prepare. Front ends render the
     /// preview (and --dry-run stops here, exactly as today).</summary>
-    public CheckpointRunPreview Prepare(string? planId, string? checkpointId) =>
-        _runner.Prepare(planId, checkpointId);
+    public CheckpointRunPreview Prepare(
+        string? planId, string? checkpointId,
+        bool overrideCompleteByEvidence = false, bool overrideUnmergedBase = false) =>
+        _runner.Prepare(planId, checkpointId, overrideCompleteByEvidence, overrideUnmergedBase);
 
     public async Task<CheckpointSessionResult> ExecuteAsync(
         CheckpointRunPreview preview,
@@ -229,6 +237,7 @@ public sealed class CheckpointRunSession(
                     Verification = verification,
                     CommitSha = sha,
                     AttemptCostUsd = attemptCostUsd,
+                    NextStep = NextStep(preview),
                 };
 
             case CheckpointChoice.Reject:
@@ -241,6 +250,7 @@ public sealed class CheckpointRunSession(
                     Verification = verification,
                     DiscardedChanges = decision.DiscardChanges,
                     AttemptCostUsd = attemptCostUsd,
+                    NextStep = NextStep(preview),
                 };
 
             default:
@@ -252,9 +262,15 @@ public sealed class CheckpointRunSession(
                     Verification = verification,
                     AutoDeferred = decision.AutoDeferred,
                     AttemptCostUsd = attemptCostUsd,
+                    NextStep = NextStep(preview),
                 };
         }
     }
+
+    /// <summary>Re-reads the plan so a status flip the decision just applied (Approve +
+    /// MarkCheckpointComplete) is reflected before deciding what comes next.</summary>
+    private string NextStep(CheckpointRunPreview preview) =>
+        NextStepAdvice.Describe(new VaultReader(_layout).ReadPlan(preview.Plan.PlanId), preview.Branch);
 
     private CheckpointDecisionContext Context(
         CheckpointRunPreview preview,

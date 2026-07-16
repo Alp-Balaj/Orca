@@ -140,7 +140,7 @@ public sealed class CheckpointRunnerObserverTests : IDisposable
         runner.Approve(first.Preview, null);
 
         var observer = new RecordingRunObserver();
-        await runner.RunAsync(runner.Prepare(null, "01-tag-entity"), observer);
+        await runner.RunAsync(runner.Prepare(null, "01-tag-entity", overrideCompleteByEvidence: true), observer);
 
         var branch = Assert.IsType<RunObservation.BranchReady>(observer.Events[0]);
         Assert.False(branch.Created);

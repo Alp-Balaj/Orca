@@ -64,8 +64,13 @@ public sealed class CheckpointRunner(
     private readonly RunStateStore _stateStore = new(workspace.RepoRoot);
 
     /// <summary>Read-only planning of the run: resolves plan and checkpoint, computes
-    /// attempt number, branch, prompt, and the exact argv. Throws instead of guessing.</summary>
-    public CheckpointRunPreview Prepare(string? planId, string? checkpointId)
+    /// attempt number, branch, prompt, and the exact argv. Throws instead of guessing.
+    /// <paramref name="overrideCompleteByEvidence"/> and <paramref name="overrideUnmergedBase"/>
+    /// let a human deliberately proceed past the two guards below instead of fixing the
+    /// underlying state first.</summary>
+    public CheckpointRunPreview Prepare(
+        string? planId, string? checkpointId,
+        bool overrideCompleteByEvidence = false, bool overrideUnmergedBase = false)
     {
         var reader = new VaultReader(_layout);
         var resolvedPlanId = PlanLocator.ResolvePlanId(_layout, planId);
@@ -122,6 +127,55 @@ public sealed class CheckpointRunner(
             && state?.CheckpointId == checkpoint.Id
             && workspace.CurrentBranch() == branch
             && !workspace.IsClean();
+
+        // Evidence the plan file itself doesn't know about yet: a human approved this
+        // checkpoint (its branch head is Orca's own structured commit) or the Verifier
+        // already passed its latest attempt, but the checkpoint's status line in the plan
+        // was never flipped to complete — almost always a forgotten "mark complete" click
+        // rather than an intentional re-run. A checkpoint mid pending-decision (verified,
+        // not yet committed) is the ordinary resume path, not forgotten evidence, so it is
+        // exempt here. Refuse before anything spends so the human fixes the plan file (or
+        // explicitly overrides) instead of paying for a redundant attempt.
+        if (checkpoint.Status == CheckpointStatus.Pending && !overrideCompleteByEvidence && !pendingDecision)
+        {
+            var approvalCommitAtHead = branchExists
+                && IsApprovalCommit(workspace.CommitSubject(branch), plan.PlanId, checkpoint.Id);
+            var latestVerificationPasses =
+                verifications.Count > 0 && verifications[^1].Verdict == VerificationVerdict.Pass;
+
+            if (approvalCommitAtHead || latestVerificationPasses)
+            {
+                var reason = approvalCommitAtHead
+                    ? $"branch '{branch}' already has an Orca approval commit for it"
+                    : $"attempt {verifications[^1].Attempt} already has a passing verification record";
+                throw new CheckpointRunException(
+                    $"checkpoint '{checkpoint.Id}' looks complete by evidence ({reason}), but " +
+                    $"{_layout.PlanFile(plan.PlanId)} still lists it as status: pending — likely a forgotten " +
+                    "status flip rather than an intentional re-run. Edit that file to mark the checkpoint " +
+                    "complete, or pass --override-complete-by-evidence to run it again anyway.");
+            }
+        }
+
+        // The previous checkpoint (by plan order) may have been approved without its
+        // branch ever being merged into base_branch — this checkpoint would then build on
+        // top of work the base branch doesn't have yet. Warn loudly and require an
+        // explicit override; this is read-only, so nothing here merges on the human's
+        // behalf.
+        if (index > 0 && !overrideUnmergedBase)
+        {
+            var previousCheckpoint = plan.Checkpoints[index - 1];
+            var previousBranch = CheckpointBranch.Name(plan.PlanId, previousCheckpoint.Id);
+            if (workspace.BranchExists(previousBranch)
+                && IsApprovalCommit(workspace.CommitSubject(previousBranch), plan.PlanId, previousCheckpoint.Id)
+                && !workspace.IsAncestor(previousBranch, plan.BaseBranch))
+            {
+                throw new CheckpointRunException(
+                    $"checkpoint '{previousCheckpoint.Id}' was approved on '{previousBranch}', but that branch " +
+                    $"is not yet merged into base branch '{plan.BaseBranch}' — this checkpoint would build on " +
+                    $"top of unmerged work. Merge it first: git switch {plan.BaseBranch} && git merge " +
+                    $"{previousBranch} — or pass --override-unmerged-base to proceed anyway.");
+            }
+        }
 
         // Since step 7 a checkpoint run includes the verification pipeline, so a repo
         // missing its Reconciler/Verifier config or the two ceilings must refuse here —
@@ -304,6 +358,14 @@ public sealed class CheckpointRunner(
 
         return attempts;
     }
+
+    /// <summary>True when <paramref name="commitSubject"/> is the subject line
+    /// <see cref="CheckpointCommitMessage.Build"/> writes for this exact plan/checkpoint —
+    /// how the two Prepare guards above recognize a real human approval rather than any
+    /// commit that merely happens to sit at a checkpoint branch's head.</summary>
+    private static bool IsApprovalCommit(string? commitSubject, string planId, string checkpointId) =>
+        commitSubject is not null
+        && commitSubject.StartsWith($"orca: {planId}/{checkpointId} attempt ", StringComparison.Ordinal);
 
     private static (Checkpoint Checkpoint, int Index) SelectCheckpoint(Plan plan, string? checkpointId)
     {

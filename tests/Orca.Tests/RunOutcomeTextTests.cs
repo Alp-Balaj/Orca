@@ -27,6 +27,7 @@ public sealed class RunOutcomeTextTests
         public bool AutoDeferred { get; set; }
         public decimal? AttemptCostUsd { get; set; }
         public CheckpointVerificationOutcome? Verification { get; set; }
+        public string NextStep { get; set; } = "next: checkpoint 'next-one' — do the next thing";
 
         public CheckpointSessionResult Build() => new()
         {
@@ -37,6 +38,7 @@ public sealed class RunOutcomeTextTests
             AutoDeferred = AutoDeferred,
             AttemptCostUsd = AttemptCostUsd,
             Verification = Verification,
+            NextStep = NextStep,
         };
     }
 
@@ -102,7 +104,7 @@ public sealed class RunOutcomeTextTests
             CheckpointSessionOutcome.Approved, b => b.CommitSha = "0123456789abcdef0000")));
 
         Assert.Contains("committed 0123456789ab on orca/alpha/01-a", text);
-        Assert.Contains("Review and merge the branch", text);
+        Assert.Contains("next: checkpoint 'next-one'", text);
     }
 
     [Fact]

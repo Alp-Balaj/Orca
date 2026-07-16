@@ -50,7 +50,7 @@ internal static class RunOutcomeText
                 Head(lines, "approved", TuiRole.Success);
                 var sha = result.CommitSha is { Length: >= 12 } s ? s[..12] : result.CommitSha ?? "(unknown)";
                 Body(lines, $"committed {sha} on {result.Preview.Branch}");
-                Body(lines, "Review and merge the branch when ready; then mark the checkpoint complete in the plan.", TuiRole.Dim);
+                Body(lines, result.NextStep!, TuiRole.Dim);
                 break;
 
             case CheckpointSessionOutcome.Rejected:
@@ -58,6 +58,7 @@ internal static class RunOutcomeText
                 Body(lines, result.DiscardedChanges
                     ? "changes discarded — the branch is back at its base state."
                     : "changes left in place — re-run to decide later.");
+                Body(lines, result.NextStep!, TuiRole.Dim);
                 break;
 
             case CheckpointSessionOutcome.Deferred:
@@ -67,6 +68,7 @@ internal static class RunOutcomeText
                 Body(lines, result.AutoDeferred
                     ? "auto-deferred — the decision is waiting; re-run from an interactive terminal (nothing is re-paid)."
                     : "re-run to pick this decision back up.");
+                Body(lines, result.NextStep!, TuiRole.Dim);
                 break;
 
             case CheckpointSessionOutcome.Interrupted:

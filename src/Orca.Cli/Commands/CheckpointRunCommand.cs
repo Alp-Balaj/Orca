@@ -32,6 +32,14 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
         [CommandOption("--repo <PATH>")]
         [Description("Target repo (any directory inside it). Defaults to the current directory.")]
         public string? Repo { get; init; }
+
+        [CommandOption("--override-complete-by-evidence")]
+        [Description("Run a checkpoint anyway even though its branch head or verification record already shows it complete (the plan file just wasn't flipped).")]
+        public bool OverrideCompleteByEvidence { get; init; }
+
+        [CommandOption("--override-unmerged-base")]
+        [Description("Run anyway even though the previous checkpoint's approved branch is not yet merged into base_branch.")]
+        public bool OverrideUnmergedBase { get; init; }
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings)
@@ -40,7 +48,9 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
         var config = ConfigLoader.Load(workspace.RepoRoot);
         var session = new CheckpointRunSession(config, workspace, new ClaudeCodeExecutor());
 
-        var preview = session.Prepare(settings.Plan, settings.Checkpoint);
+        var preview = session.Prepare(
+            settings.Plan, settings.Checkpoint,
+            settings.OverrideCompleteByEvidence, settings.OverrideUnmergedBase);
         CheckpointRenderer.RenderPreview(preview);
 
         if (settings.DryRun)
@@ -95,14 +105,14 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
             case CheckpointSessionOutcome.Approved:
                 AnsiConsole.MarkupLine(
                     $"[green]committed[/] {result.CommitSha![..12].EscapeMarkup()} on {result.Preview.Branch.EscapeMarkup()}");
-                AnsiConsole.MarkupLine(
-                    "Review and merge the branch when ready; then mark the checkpoint complete in the plan.");
+                AnsiConsole.MarkupLine(result.NextStep!.EscapeMarkup());
                 return 0;
 
             case CheckpointSessionOutcome.Rejected:
                 AnsiConsole.MarkupLine(result.DiscardedChanges
                     ? "[yellow]changes discarded[/] — the branch is back at its base state."
                     : "[yellow]changes left in place[/] — re-run checkpoint-run to decide later.");
+                AnsiConsole.MarkupLine(result.NextStep!.EscapeMarkup());
                 return 0;
 
             case CheckpointSessionOutcome.Deferred:
@@ -113,10 +123,12 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
                 {
                     AnsiConsole.MarkupLine(
                         "[yellow]auto-deferred[/] — this terminal is non-interactive, so the checkpoint ran and its decision is waiting. Re-run checkpoint-run from a real terminal to approve/reject/defer (nothing is re-paid).");
+                    AnsiConsole.MarkupLine(result.NextStep!.EscapeMarkup());
                     return 2;
                 }
 
                 AnsiConsole.MarkupLine("[yellow]deferred[/] — re-run checkpoint-run to pick this decision back up.");
+                AnsiConsole.MarkupLine(result.NextStep!.EscapeMarkup());
                 return 0;
 
             default:
