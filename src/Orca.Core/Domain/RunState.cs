@@ -44,6 +44,17 @@ public sealed record RunState
     /// exactly as before this field existed.</summary>
     public string? LastModel { get; init; }
 
+    /// <summary>The most recent invocation's non-benign rate-limit evidence (BF-08):
+    /// status and resets-at, previously classified against and then discarded. Null when
+    /// the last invocation saw only benign ("allowed"-class) statuses — a healthy run
+    /// clears stale warnings. Not <c>required</c>, same rationale as
+    /// <see cref="LastModel"/>. SUG-06's window tracking builds on this.</summary>
+    public string? LastRateLimitStatus { get; init; }
+
+    /// <summary>Unix seconds, exactly as the CLI reported it; see
+    /// <see cref="LastRateLimitStatus"/>.</summary>
+    public long? LastRateLimitResetsAt { get; init; }
+
     public required DateTimeOffset StartedAt { get; init; }
     public required DateTimeOffset UpdatedAt { get; init; }
 }

@@ -103,6 +103,42 @@ public class RunStateUpdatesTests
     }
 
     [Fact]
+    public void Non_benign_rate_limit_evidence_is_persisted_not_discarded()
+    {
+        // BF-08: previously LastRateLimit was classified against and thrown away.
+        var rateLimited = Completed() with
+        {
+            ExitCode = 1,
+            Result = Completed().Result! with { IsError = true },
+            LastRateLimit = new RateLimitInfo { Status = "rejected", ResetsAt = 1_784_000_000 },
+        };
+
+        var updated = RunStateUpdates.Apply(State(), rateLimited, Now);
+
+        Assert.Equal("rejected", updated.LastRateLimitStatus);
+        Assert.Equal(1_784_000_000, updated.LastRateLimitResetsAt);
+    }
+
+    [Fact]
+    public void A_benign_status_clears_stale_rate_limit_evidence()
+    {
+        var warned = RunStateUpdates.Apply(State(), Completed() with
+        {
+            ExitCode = 1,
+            Result = Completed().Result! with { IsError = true },
+            LastRateLimit = new RateLimitInfo { Status = "rejected", ResetsAt = 1_784_000_000 },
+        }, Now);
+
+        var healthy = RunStateUpdates.Apply(warned, Completed() with
+        {
+            LastRateLimit = new RateLimitInfo { Status = "allowed" },
+        }, Now.AddMinutes(5));
+
+        Assert.Null(healthy.LastRateLimitStatus);
+        Assert.Null(healthy.LastRateLimitResetsAt);
+    }
+
+    [Fact]
     public void Cost_accumulates_across_invocations()
     {
         var once = RunStateUpdates.Apply(State(), Completed(), Now);

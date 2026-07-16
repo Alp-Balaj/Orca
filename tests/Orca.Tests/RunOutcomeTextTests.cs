@@ -92,8 +92,9 @@ public sealed class RunOutcomeTextTests
         var text = Plain(RunOutcomeText.Describe(
             Result(CheckpointSessionOutcome.VerificationIncomplete, b => b.Verification = verification)));
 
-        Assert.Contains("rate-limited", text);
-        Assert.Contains("subscription window is exhausted", text);
+        // BF-08: an inference from an unrecognized status, never asserted exhaustion.
+        Assert.Contains("possible rate limit", text);
+        Assert.DoesNotContain("exhausted", text);
         Assert.Contains("the Implementer's changes are untouched", text);
     }
 

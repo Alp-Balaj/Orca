@@ -36,6 +36,11 @@ public sealed record CheckpointVerificationOutcome
 
     public required string? FailureResultText { get; init; }
 
+    /// <summary>The failing invocation's last rate-limit evidence, so a RateLimited
+    /// failure can be rendered honestly — status named, resets-at shown — instead of
+    /// asserting exhaustion from an unrecognized status (BF-08).</summary>
+    public RateLimitInfo? FailureRateLimit { get; init; }
+
     /// <summary>Quota spent by this pipeline run (Reconciler + Verifier invocations).</summary>
     public required decimal CostUsd { get; init; }
 }
@@ -203,7 +208,9 @@ public sealed class CheckpointVerifier(
         return baseline with { Record = record, RecordPath = recordPath };
     }
 
-    private sealed record RoleFailure(string Role, string Detail, InvocationStopReason? StopReason, string? ResultText);
+    private sealed record RoleFailure(
+        string Role, string Detail, InvocationStopReason? StopReason, string? ResultText,
+        RateLimitInfo? RateLimit = null);
 
     private sealed record RoleResult<T>(T? Value, RoleFailure? Failure, decimal CostUsd) where T : class;
 
@@ -270,7 +277,8 @@ public sealed class CheckpointVerifier(
                 return new RoleResult<T>(null, new RoleFailure(roleKey,
                     $"the {roleKey} invocation did not succeed (stop reason: {InvocationStopReasons.ToWire(execution.StopReason)})",
                     execution.StopReason,
-                    execution.Result?.ResultText), cost);
+                    execution.Result?.ResultText,
+                    execution.LastRateLimit), cost);
             }
 
             string? parseFailure = null;
@@ -404,5 +412,6 @@ public sealed class CheckpointVerifier(
         FailureRole = failure.Role,
         FailureStopReason = failure.StopReason,
         FailureResultText = failure.ResultText,
+        FailureRateLimit = failure.RateLimit,
     };
 }

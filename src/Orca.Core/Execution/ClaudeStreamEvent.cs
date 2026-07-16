@@ -81,6 +81,28 @@ public sealed record RateLimitInfo
     public long? ResetsAt { get; init; }
     public string? RateLimitType { get; init; }
 
+    /// <summary>The " (window resets …)" suffix for guidance messages, empty when the
+    /// event carried no readable <c>resetsAt</c> (BF-08: previously computed ad hoc per
+    /// render site; local time because this is human guidance, not a record). Lenient
+    /// like the rest of this type: an out-of-range value yields no suffix, never a
+    /// crash in an error-path message.</summary>
+    public string ResetsAtText
+    {
+        get
+        {
+            if (ResetsAt is not { } ts)
+                return "";
+            try
+            {
+                return $" (window resets {DateTimeOffset.FromUnixTimeSeconds(ts).ToLocalTime():yyyy-MM-dd HH:mm zzz})";
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return "";
+            }
+        }
+    }
+
     internal static RateLimitInfo? Parse(JsonElement root)
     {
         if (!root.TryGetProperty("rate_limit_info", out var info) || info.ValueKind != JsonValueKind.Object)

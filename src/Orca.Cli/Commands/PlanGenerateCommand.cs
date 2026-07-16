@@ -200,11 +200,13 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
         switch (last.StopReason)
         {
             case InvocationStopReason.RateLimited:
-                var resets = outcome.LastExecution.LastRateLimit?.ResetsAt is { } ts
-                    ? $" (window resets {DateTimeOffset.FromUnixTimeSeconds(ts).ToLocalTime():yyyy-MM-dd HH:mm zzz})"
-                    : "";
+                // BF-08: same honesty as the checkpoint lane — an unrecognized status is
+                // a possible rate limit, not a certain exhaustion.
+                var rateLimit = outcome.LastExecution.LastRateLimit;
                 AnsiConsole.MarkupLine(
-                    $"[red]rate-limited:[/] the subscription window is exhausted{resets.EscapeMarkup()} — nothing is retried automatically; re-run plan-generate later and attempt numbering resumes.");
+                    $"[red]possible rate limit[/] (status '{(rateLimit?.Status ?? "unknown").EscapeMarkup()}')" +
+                    $"{(rateLimit?.ResetsAtText ?? "").EscapeMarkup()} — nothing is retried automatically; re-run " +
+                    "plan-generate later and attempt numbering resumes. If quota wasn't the cause, the run log has the CLI's full story.");
                 break;
             case InvocationStopReason.AuthFailed:
                 AnsiConsole.MarkupLine(
