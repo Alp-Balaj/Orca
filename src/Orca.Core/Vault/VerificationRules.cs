@@ -21,6 +21,8 @@ public static class VerificationRules
             throw new VaultSchemaException(context, "plan_version must be >= 1");
         if (record.Attempt < 1)
             throw new VaultSchemaException(context, "attempt must be >= 1");
+        if (record.WorkingTreeHash is not null && string.IsNullOrWhiteSpace(record.WorkingTreeHash))
+            throw new VaultSchemaException(context, "working_tree_hash must be either absent or a non-empty string");
 
         var gatesPass = record.Gates.Build == GateOutcome.Pass && record.Gates.Tests == GateOutcome.Pass;
         if (!gatesPass)

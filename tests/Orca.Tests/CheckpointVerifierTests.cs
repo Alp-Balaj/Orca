@@ -181,6 +181,14 @@ public sealed class CheckpointVerifierTests : IDisposable
         Assert.NotNull(outcome.Reconciliation);
         Assert.Equal(ReconciliationVerdict.Full, outcome.Reconciliation.ImplementsPlan);
 
+        // BF-19: a green record still carries a tree fingerprint (Approve checks it later)
+        // and, unlike before, its gates' own output — not just a pointer to the ephemeral,
+        // gitignored run log, which does not reliably survive.
+        Assert.Equal(GitWorkspace.Discover(_repo.Root).WorkingTreeHash(), outcome.Record.WorkingTreeHash);
+        Assert.Contains("### build output (last 60 lines)", outcome.Record.Body);
+        Assert.Contains("### tests output (last 60 lines)", outcome.Record.Body);
+        Assert.Contains("gate-output-0", outcome.Record.Body);
+
         // Staging is gone; the canonical, Orca-serialized records remain.
         Assert.False(File.Exists(StagingReconciliation()));
         Assert.False(File.Exists(StagingSemantic()));

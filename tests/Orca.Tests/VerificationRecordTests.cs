@@ -57,6 +57,52 @@ public class VerificationRecordTests
     }
 
     [Fact]
+    public void A_record_with_no_working_tree_hash_key_parses_it_as_null()
+    {
+        // FailedGatesRecord/PassingRecord predate BF-19 and never write the key —
+        // exactly what an old, already-in-the-vault record looks like.
+        Assert.Null(VerificationRecordParser.Parse(FailedGatesRecord, "01-tag-entity.attempt-1.md").WorkingTreeHash);
+        Assert.Null(VerificationRecordParser.Parse(PassingRecord, "01-tag-entity.attempt-2.md").WorkingTreeHash);
+    }
+
+    [Fact]
+    public void Working_tree_hash_round_trips_when_present()
+    {
+        var text = PassingRecord.Replace(
+            "  tests: pass\n", "  tests: pass\nworking_tree_hash: 74b85cf3a04f6222215ca0af424b55aa2ebf0c75\n");
+
+        var record = VerificationRecordParser.Parse(text, "01-tag-entity.attempt-2.md");
+        Assert.Equal("74b85cf3a04f6222215ca0af424b55aa2ebf0c75", record.WorkingTreeHash);
+
+        var serialized = VerificationRecordSerializer.Serialize(record);
+        Assert.Contains("working_tree_hash: 74b85cf3a04f6222215ca0af424b55aa2ebf0c75\n", serialized);
+        Assert.Equal(record.WorkingTreeHash, VerificationRecordParser.Parse(serialized, "01-tag-entity.attempt-2.md").WorkingTreeHash);
+    }
+
+    [Fact]
+    public void Serializer_omits_the_key_entirely_when_the_hash_is_absent()
+    {
+        var record = VerificationRecordParser.Parse(PassingRecord, "01-tag-entity.attempt-2.md");
+        Assert.Null(record.WorkingTreeHash);
+
+        Assert.DoesNotContain("working_tree_hash", VerificationRecordSerializer.Serialize(record));
+    }
+
+    [Fact]
+    public void Rules_reject_an_empty_working_tree_hash()
+    {
+        var record = new VerificationRecord(
+            1, "recipe-tagging", 1, "01-tag-entity", 1,
+            DateTimeOffset.Parse("2026-07-06T15:20:00Z"),
+            new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+            [new SemanticCriterionResult("criterion", SemanticVerdict.Pass, null)],
+            VerificationVerdict.Pass, "Body.\n", WorkingTreeHash: "   ");
+
+        var ex = Assert.Throws<VaultSchemaException>(() => VerificationRules.Validate(record, "context"));
+        Assert.Contains("working_tree_hash", ex.Message);
+    }
+
+    [Fact]
     public void Parses_a_passing_record_with_semantic_results()
     {
         var record = VerificationRecordParser.Parse(PassingRecord, "01-tag-entity.attempt-2.md");

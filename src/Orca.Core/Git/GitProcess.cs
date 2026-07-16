@@ -14,8 +14,13 @@ internal static class GitProcess
     internal sealed record Result(int ExitCode, string Stdout, string Stderr);
 
     /// <summary>Runs git and throws on a nonzero exit unless <paramref name="allowNonZero"/>;
-    /// callers that branch on exit codes (e.g. ref existence checks) opt in.</summary>
-    internal static Result Run(string workingDirectory, IReadOnlyList<string> arguments, bool allowNonZero = false)
+    /// callers that branch on exit codes (e.g. ref existence checks) opt in.
+    /// <paramref name="environment"/> overrides/adds on top of the inherited environment
+    /// (e.g. <c>GIT_INDEX_FILE</c> to operate on a scratch index without touching the
+    /// repo's real one) — never a replacement, so PATH etc. still resolve normally.</summary>
+    internal static Result Run(
+        string workingDirectory, IReadOnlyList<string> arguments, bool allowNonZero = false,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -28,6 +33,9 @@ internal static class GitProcess
         };
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
+        if (environment is not null)
+            foreach (var (key, value) in environment)
+                startInfo.Environment[key] = value;
 
         Process process;
         try

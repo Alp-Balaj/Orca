@@ -308,6 +308,9 @@ public sealed class CheckpointRunSessionTests : IDisposable
         var context = gate.DecisionContext!;
         Assert.NotNull(context.Run);
         Assert.NotNull(context.Verification!.Record);
+        // BF-19: the record is bound to the tree it certified — Approve just committed
+        // exactly that tree, so HEAD's own tree now matches the recorded fingerprint.
+        Assert.Equal(_repo.Git("rev-parse", "HEAD^{tree}").Trim(), context.Verification.Record.WorkingTreeHash);
         Assert.NotEmpty(context.StatusLines);
         Assert.Equal(0.75m, context.AttemptCostUsd);
 
@@ -381,6 +384,68 @@ public sealed class CheckpointRunSessionTests : IDisposable
         await Assert.ThrowsAsync<CheckpointRunException>(() => session.ExecuteAsync(preview, gate));
 
         Assert.Equal(CheckpointStatus.Pending, ReadPlan().Checkpoints[0].Status);
+    }
+
+    [Fact]
+    public async Task Approve_refuses_when_the_tree_drifted_since_verification()
+    {
+        CommitOrcaIgnore();
+        var gate = new ScriptedGate
+        {
+            Decision = new CheckpointDecision { Choice = CheckpointChoice.Approve },
+            // BF-19: something touches the tree after the gates/Reconciler/Verifier
+            // already certified it — the realistic case is a Defer leaving the checkpoint
+            // branch checked out and dirty across sessions, with the drift landing before
+            // a later Approve. Simulate that arriving right before the runner commits.
+            BeforeDecisionReturns = () => _repo.WriteFile("src/Unverified.cs", "// not gated\n"),
+        };
+        var session = Session(GreenPipelineExecutor());
+        var preview = session.Prepare(null, null);
+
+        var e = await Assert.ThrowsAsync<CheckpointRunException>(() => session.ExecuteAsync(preview, gate));
+
+        Assert.Contains("working tree has changed", e.Message);
+        Assert.Contains("01-tag-entity", e.Message);
+        Assert.Contains("attempt 1", e.Message);
+        // Refused before committing — the drifted file is still sitting there, untouched,
+        // and the checkpoint status was never flipped.
+        Assert.False(GitWorkspace.Discover(_repo.Root).IsClean());
+        Assert.True(File.Exists(Path.Combine(_repo.Root, "src/Unverified.cs")));
+        Assert.Equal(CheckpointStatus.Pending, ReadPlan().Checkpoints[0].Status);
+    }
+
+    [Fact]
+    public async Task Approve_tolerates_drift_when_the_record_predates_the_tree_hash_field()
+    {
+        // An old record (written before BF-19) never captured a WorkingTreeHash — Approve
+        // must not retroactively enforce a guarantee that recording never made. Defer
+        // first (the realistic path to a resumed decision), then strip the field from the
+        // real, otherwise-legitimate record to simulate exactly what a pre-fix Orca left
+        // on disk, before drifting the tree and resuming with Approve.
+        CommitOrcaIgnore();
+        var deferGate = new ScriptedGate { Decision = new CheckpointDecision { Choice = CheckpointChoice.Defer } };
+        var setup = Session(GreenPipelineExecutor());
+        await setup.ExecuteAsync(setup.Prepare(null, null), deferGate);
+
+        var recordPath = new VaultLayout(_vault, "Plans").VerificationFile("recipe-tagging", "01-tag-entity", 1);
+        var stripped = string.Concat(File.ReadAllLines(recordPath)
+            .Where(line => !line.StartsWith("working_tree_hash:", StringComparison.Ordinal))
+            .Select(line => line + "\n"));
+        Assert.Contains("working_tree_hash:", File.ReadAllText(recordPath)); // sanity: was there to strip
+        File.WriteAllText(recordPath, stripped);
+
+        _repo.WriteFile("src/Unverified.cs", "// drift after the (now-stripped) record\n");
+        var executor = new ScriptedExecutor(); // nothing may be invoked on resume
+        var gate = new ScriptedGate { Decision = new CheckpointDecision { Choice = CheckpointChoice.Approve } };
+        var session = Session(executor);
+        var preview = session.Prepare(null, "01-tag-entity");
+        Assert.True(preview.PendingDecision);
+
+        var result = await session.ExecuteAsync(preview, gate);
+
+        Assert.Equal(CheckpointSessionOutcome.Approved, result.Outcome);
+        Assert.Null(result.Verification!.Record!.WorkingTreeHash);
+        Assert.True(GitWorkspace.Discover(_repo.Root).IsClean());
     }
 
     private Plan ReadPlan() => new VaultReader(new VaultLayout(_vault, "Plans")).ReadPlan("recipe-tagging");
