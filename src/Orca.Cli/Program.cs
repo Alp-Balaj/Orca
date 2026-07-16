@@ -1,7 +1,6 @@
 using Orca.Cli;
 using Orca.Cli.Commands;
 using Orca.Cli.Tui;
-using Spectre.Console;
 using Spectre.Console.Cli;
 
 var app = new CommandApp();
@@ -39,7 +38,11 @@ catch (Exception e) when (ExitDecision.Describe(e) is { } message)
 {
     // Fail loud, but with the reason and no stack noise — these are refusals and
     // misconfigurations, not bugs. ExitDecision is the pure decision of what counts as
-    // one of those; anything else escapes this filter and crashes visibly.
-    AnsiConsole.MarkupLine($"[red]error:[/] {message.EscapeMarkup()}");
+    // one of those; anything else escapes this filter and crashes visibly. Plain
+    // Console.Error (not AnsiConsole, which targets stdout and would color-code the line
+    // based on the parent terminal's environment even when this stream is redirected) so
+    // a script piping stdout never sees this, and stderr always reads byte-for-byte
+    // "error: <message>".
+    Console.Error.WriteLine($"error: {message}");
     return 1;
 }
