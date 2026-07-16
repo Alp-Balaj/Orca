@@ -4,6 +4,7 @@ using Orca.Core.Domain;
 using Orca.Core.Execution;
 using Orca.Core.Git;
 using Orca.Core.Planning;
+using Orca.Core.Run;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -96,6 +97,8 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
             return 1;
         }
 
+        // SUG-03 stage B groundwork: same one-process-per-repo rule as checkpoint-run.
+        using var _ = OrcaLock.Acquire(workspace.RepoRoot);
         var outcome = await strategy.GenerateAsync(preview);
         RenderOutcome(outcome);
         return outcome.State.Status == PlanningRunStatus.Succeeded ? 0 : 1;

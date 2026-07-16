@@ -46,6 +46,11 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
     {
         var workspace = GitWorkspace.Discover(settings.Repo ?? Directory.GetCurrentDirectory());
         var config = ConfigLoader.Load(workspace.RepoRoot);
+        // SUG-03 stage B groundwork: one Orca process per repo — two sessions fighting
+        // over one working tree and run state was previously possible and silent.
+        // --dry-run is read-only but goes through Prepare/branch checks; locking it too
+        // keeps the rule simple (it exits immediately anyway).
+        using var _ = OrcaLock.Acquire(workspace.RepoRoot);
         var session = new CheckpointRunSession(config, workspace, new ClaudeCodeExecutor());
         var interactive = ConsoleInteractivity.Detect();
 
