@@ -211,7 +211,9 @@ public sealed class CheckpointRunnerTests : IDisposable
         var first = await runner.RunAsync(runner.Prepare(null, null));
         runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
 
-        var preview = runner.Prepare(null, "01-tag-entity");
+        // Approve-only never flips the plan file, so without an override the
+        // complete-by-evidence guard would refuse this re-run outright.
+        var preview = runner.Prepare(null, "01-tag-entity", overrideCompleteByEvidence: true);
         Assert.Equal(2, preview.Attempt);
         Assert.True(preview.BranchExists);
 
@@ -250,14 +252,108 @@ public sealed class CheckpointRunnerTests : IDisposable
                 [new SemanticCriterionResult("Tag entity exists", SemanticVerdict.Pass, null)],
                 VerificationVerdict.Pass, "Looks good.\n"));
 
-        var firstB = await runner.RunAsync(runner.Prepare(null, "02-endpoints"));
+        // Checkpoint A's approved branch was never merged into base_branch — without an
+        // override, the unmerged-base guard would refuse to start checkpoint B on top of it.
+        var firstB = await runner.RunAsync(runner.Prepare(null, "02-endpoints", overrideUnmergedBase: true));
         runner.Approve(firstB.Preview, firstB.Execution.Result!.TotalCostUsd);
         // Run state now points at checkpoint B — it has no opinion left on checkpoint A.
 
-        var secondA = runner.Prepare(null, "01-tag-entity");
+        // Checkpoint A itself is still pending in the plan file despite its approval
+        // commit, so re-running it also needs the complete-by-evidence override.
+        var secondA = runner.Prepare(null, "01-tag-entity", overrideCompleteByEvidence: true);
 
         Assert.Equal(2, secondA.Attempt);
         Assert.True(secondA.BranchExists);
+    }
+
+    [Fact]
+    public async Task Prepare_refuses_a_pending_checkpoint_whose_branch_head_is_already_an_approval_commit()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+        // Approve-only never flips the plan file — the checkpoint is complete by evidence
+        // (its branch head is Orca's own approval commit) but the plan still says pending.
+
+        var e = Assert.Throws<CheckpointRunException>(() => runner.Prepare(null, "01-tag-entity"));
+
+        Assert.Contains(Path.Combine(_vault, "Plans", "recipe-tagging", "recipe-tagging.md"), e.Message);
+        Assert.Contains("--override-complete-by-evidence", e.Message);
+    }
+
+    [Fact]
+    public void Prepare_refuses_a_pending_checkpoint_with_a_passing_verification_record_for_the_latest_attempt()
+    {
+        // No run/approve at all — the evidence is solely a passing verification record,
+        // the other half of "complete by evidence".
+        new Orca.Core.Vault.VaultWriter(new Orca.Core.Vault.VaultLayout(_vault, "Plans")).WriteVerificationRecord(
+            new VerificationRecord(
+                1, "recipe-tagging", 1, "01-tag-entity", 1, DateTimeOffset.Parse("2026-07-07T10:00:00Z"),
+                new GateResults(GateOutcome.Pass, GateOutcome.Pass),
+                [new SemanticCriterionResult("Tag entity exists", SemanticVerdict.Pass, null)],
+                VerificationVerdict.Pass, "Looks good.\n"));
+
+        var e = Assert.Throws<CheckpointRunException>(() =>
+            Runner(new FakeExecutor(_repo)).Prepare(null, "01-tag-entity"));
+
+        Assert.Contains("passing verification record", e.Message);
+        Assert.Contains("--override-complete-by-evidence", e.Message);
+    }
+
+    [Fact]
+    public async Task Overriding_the_complete_by_evidence_guard_lets_the_run_proceed()
+    {
+        var executor = new FakeExecutor(_repo);
+        var runner = Runner(executor);
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+
+        var preview = runner.Prepare(null, "01-tag-entity", overrideCompleteByEvidence: true);
+
+        Assert.Equal(2, preview.Attempt);
+        Assert.True(preview.BranchExists);
+    }
+
+    [Fact]
+    public async Task Prepare_warns_loudly_when_the_previous_checkpoints_approved_branch_is_unmerged()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+        // Checkpoint A's branch was approved but never merged back into base_branch (main).
+
+        var e = Assert.Throws<CheckpointRunException>(() => runner.Prepare(null, "02-endpoints"));
+
+        Assert.Contains("orca/recipe-tagging/01-tag-entity", e.Message);
+        Assert.Contains("git switch main && git merge orca/recipe-tagging/01-tag-entity", e.Message);
+        Assert.Contains("--override-unmerged-base", e.Message);
+    }
+
+    [Fact]
+    public async Task Overriding_the_unmerged_base_guard_lets_the_next_checkpoint_start()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+
+        var preview = runner.Prepare(null, "02-endpoints", overrideUnmergedBase: true);
+
+        Assert.Equal("02-endpoints", preview.Checkpoint.Id);
+        Assert.Equal(1, preview.Attempt);
+    }
+
+    [Fact]
+    public async Task Prepare_does_not_warn_once_the_previous_checkpoints_branch_is_merged_into_base()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+        _repo.Git("checkout", "main");
+        _repo.Git("merge", "--ff-only", "orca/recipe-tagging/01-tag-entity");
+
+        var preview = runner.Prepare(null, "02-endpoints");
+
+        Assert.Equal("02-endpoints", preview.Checkpoint.Id);
     }
 
     [Fact]
@@ -278,7 +374,10 @@ public sealed class CheckpointRunnerTests : IDisposable
         // gone, but the vault's evidence of attempt 1 survives.
         File.Delete(new RunStateStore(_repo.Root).PathFor("recipe-tagging"));
 
-        var preview = runner.Prepare(null, "01-tag-entity");
+        // The checkpoint is still pending in the plan file despite its approval commit and
+        // passing verification — override the new complete-by-evidence guard to exercise
+        // the renumbering this test is actually about.
+        var preview = runner.Prepare(null, "01-tag-entity", overrideCompleteByEvidence: true);
 
         // Renumbered past the existing record, never reset to (and silently reusing) 1.
         Assert.Equal(2, preview.Attempt);

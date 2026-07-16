@@ -140,6 +140,30 @@ public sealed class GitWorkspace
         GitProcess.Run(RepoRoot, ["rev-parse", "--verify", "--quiet", $"refs/heads/{branch}"], allowNonZero: true)
             .ExitCode == 0;
 
+    /// <summary>The subject line (first line) of the commit at <paramref name="ref"/> —
+    /// used to recognize Orca's own structured approval commits (see
+    /// <see cref="CheckpointCommitMessage"/>) without parsing the full body. Null when the
+    /// ref does not resolve to a commit.</summary>
+    public string? CommitSubject(string @ref)
+    {
+        var result = GitProcess.Run(RepoRoot, ["log", "-1", "--format=%s", @ref], allowNonZero: true);
+        return result.ExitCode == 0 ? result.Stdout.TrimEnd('\r', '\n') : null;
+    }
+
+    /// <summary>True when <paramref name="ancestor"/> is an ancestor of
+    /// <paramref name="descendant"/> (<c>git merge-base --is-ancestor</c>) — a read-only
+    /// history check, e.g. whether an approved checkpoint branch has already been merged
+    /// into the plan's base branch.</summary>
+    public bool IsAncestor(string ancestor, string descendant)
+    {
+        var result = GitProcess.Run(
+            RepoRoot, ["merge-base", "--is-ancestor", ancestor, descendant], allowNonZero: true);
+        if (result.ExitCode is 0 or 1)
+            return result.ExitCode == 0;
+        throw new GitException(
+            $"git merge-base --is-ancestor {ancestor} {descendant} exited {result.ExitCode}: {result.Stderr.Trim()}");
+    }
+
     /// <summary>Creates <paramref name="branch"/> at <paramref name="baseBranch"/> and
     /// switches to it. Refuses on a dirty tree — launching a checkpoint onto uncommitted
     /// work is exactly what §7.1 forbids — and refuses to reuse an existing branch
