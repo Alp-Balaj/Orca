@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Orca.Core.Vault;
 
 /// <summary>Creates a new plan directory in the vault with a schema-valid skeleton plan
@@ -26,7 +28,7 @@ public static class PlanScaffold
         if (File.Exists(path))
             throw new VaultException($"refusing to overwrite existing plan file: {path}");
 
-        var timestamp = $"{now.ToUniversalTime():yyyy-MM-ddTHH:mm:ss}Z";
+        var timestamp = now.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture) + "Z";
         var text = $"""
             ---
             schema_version: 1
@@ -78,8 +80,7 @@ public static class PlanScaffold
         return path;
     }
 
-    /// <summary>Double-quoted YAML scalar — the only escaping the skeleton needs, and the
+    /// <summary>Double-quoted YAML scalar, using the vault's single shared quoting rule; the
     /// parse-before-write check catches anything this gets wrong.</summary>
-    private static string QuoteYaml(string value) =>
-        "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+    private static string QuoteYaml(string value) => YamlEmit.Quote(value);
 }

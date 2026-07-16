@@ -1,3 +1,4 @@
+using System.Globalization;
 using Orca.Core.Domain;
 using Orca.Core.Vault;
 
@@ -50,6 +51,55 @@ public sealed class PlanScaffoldTests : IDisposable
 
         var plan = new VaultReader(Layout()).ReadPlan("tricky");
         Assert.Equal("Fix: the \"big\" bug \\ regression", plan.Title);
+    }
+
+    private const string TrickyText = "Line one\r\nLine two\ttabbed";
+
+    [Fact]
+    public void Titles_with_newlines_and_all_separators_survive_the_round_trip()
+    {
+        PlanScaffold.CreatePlan(Layout(), "tricky-title", TrickyText, "Repo", "main", Now);
+
+        var plan = new VaultReader(Layout()).ReadPlan("tricky-title");
+        Assert.Equal(TrickyText, plan.Title);
+    }
+
+    [Fact]
+    public void Target_repo_with_newlines_and_all_separators_survives_the_round_trip()
+    {
+        PlanScaffold.CreatePlan(Layout(), "tricky-repo", "Title", TrickyText, "main", Now);
+
+        var plan = new VaultReader(Layout()).ReadPlan("tricky-repo");
+        Assert.Equal(TrickyText, plan.TargetRepo);
+    }
+
+    [Fact]
+    public void Base_branch_with_newlines_and_all_separators_survives_the_round_trip()
+    {
+        PlanScaffold.CreatePlan(Layout(), "tricky-branch", "Title", "Repo", TrickyText, Now);
+
+        var plan = new VaultReader(Layout()).ReadPlan("tricky-branch");
+        Assert.Equal(TrickyText, plan.BaseBranch);
+    }
+
+    [Fact]
+    public void Created_timestamp_is_formatted_with_the_invariant_calendar_regardless_of_current_culture()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("th-TH");
+        string path;
+        try
+        {
+            path = PlanScaffold.CreatePlan(Layout(), "thai-culture", "Title", "Repo", "main", Now);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
+
+        var plan = new VaultReader(Layout()).ReadPlan("thai-culture");
+        Assert.Equal(2026, plan.Created.Year);
+        Assert.Contains("created: 2026-", File.ReadAllText(path));
     }
 
     [Fact]
