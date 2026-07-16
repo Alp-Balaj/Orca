@@ -54,7 +54,10 @@ public static class SemanticChecklistParser
             if (!string.Equals(criteria[i].Criterion, acceptanceCriteria[i], StringComparison.Ordinal))
                 throw new VaultSchemaException(filePath,
                     $"criteria[{i}].criterion must be byte-exact the checkpoint's acceptance criterion at that position: " +
-                    $"expected \"{acceptanceCriteria[i]}\", got \"{criteria[i].Criterion}\" — copy criteria verbatim, in order, no paraphrase");
+                    // BF-11 §3 paper cut: a trailing space renders identically to a human —
+                    // visualize whitespace so the diff between expected and got is legible.
+                    $"expected {VisualizeWhitespace(acceptanceCriteria[i])}, got {VisualizeWhitespace(criteria[i].Criterion)} — " +
+                    "copy criteria verbatim, in order, no paraphrase");
             if (criteria[i].Verdict != SemanticVerdict.Pass && string.IsNullOrWhiteSpace(criteria[i].Note))
                 throw new VaultSchemaException(filePath,
                     $"criteria[{i}] has verdict '{SchemaEnums.ToYaml(criteria[i].Verdict)}' but no note — " +
@@ -70,5 +73,20 @@ public static class SemanticChecklistParser
         if (!string.Equals(expected, actual, StringComparison.Ordinal))
             throw new VaultSchemaException(filePath,
                 $"'{field}' must be exactly '{expected}' (the value in the request), got '{actual}'");
+    }
+
+    /// <summary>Quotes the value and makes invisible bytes visible (trailing/leading
+    /// spaces as '␣', tabs as '\t') so "ends with space " vs "ends with space" reads as
+    /// the difference it is.</summary>
+    private static string VisualizeWhitespace(string value)
+    {
+        var visible = value.Replace("\t", "\\t");
+        var leading = visible.Length - visible.TrimStart(' ').Length;
+        var trailing = visible.Length - visible.TrimEnd(' ').Length;
+        if (leading > 0)
+            visible = new string('\u2423', leading) + visible.TrimStart(' ');
+        if (trailing > 0)
+            visible = visible.TrimEnd(' ') + new string('\u2423', trailing);
+        return '"' + visible + '"';
     }
 }
