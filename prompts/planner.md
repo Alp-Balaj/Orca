@@ -66,7 +66,8 @@ Rules the parser enforces — treat every one as hard:
     (`01-…`, `02-…`, …); ids are unique.
   - `description` is one non-empty line.
   - `status` is exactly `pending` for every checkpoint.
-  - `acceptance_criteria` is a non-empty list of strings — never a paragraph.
+  - `acceptance_criteria` is a non-empty list of strings — never a paragraph, and each
+    criterion is exactly one line (no block scalars anywhere in the frontmatter).
   - `model` (optional) overrides `roles.implementer.model` for this checkpoint only — a
     non-empty string naming a model tier (e.g. `opus`, `sonnet`, `haiku`).
   - `max_budget_usd` (optional) overrides `roles.implementer.maxBudgetUsd` for this

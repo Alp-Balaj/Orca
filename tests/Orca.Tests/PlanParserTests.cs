@@ -120,4 +120,90 @@ public class PlanParserTests
         Assert.Contains(expectedMessagePart, ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(fixture, ex.FilePath, StringComparison.OrdinalIgnoreCase);
     }
+
+    // --- BF-14: hand-editing traps ---
+
+    private static string ValidTextWith(string titleLine) => $"""
+        ---
+        schema_version: 1
+        plan_id: recipe-tagging
+        plan_version: 1
+        {titleLine}
+        status: approved
+        target_repo: "RecipeApp"
+        base_branch: "main"
+        created: 2026-07-06T14:00:00Z
+        updated: 2026-07-06T14:00:00Z
+        planning:
+          strategy: single_candidate
+        checkpoints:
+          - id: 01-a
+            description: a
+            status: pending
+            acceptance_criteria: [works]
+        ---
+
+        Body.
+        """;
+
+    [Fact]
+    public void Unquoted_hash_is_caught_with_a_quote_the_value_message()
+    {
+        // BF-14 §1 (probe-confirmed): 'title: Fix #12 in parser' parsed as "Fix" with no
+        // error anywhere, and the Verifier judged the truncated criterion.
+        var ex = Assert.Throws<VaultSchemaException>(() =>
+            PlanParser.Parse(ValidTextWith("title: Fix #12 in parser"), "/vault/Plans/recipe-tagging/recipe-tagging.md"));
+
+        Assert.Contains("silently truncates", ex.Message);
+        Assert.Contains("double-quote", ex.Message);
+    }
+
+    [Fact]
+    public void A_quoted_hash_and_a_pure_comment_are_fine()
+    {
+        var plan = PlanParser.Parse(
+            ValidTextWith("title: \"Fix #12 in parser\""), "/vault/Plans/recipe-tagging/recipe-tagging.md");
+        Assert.Equal("Fix #12 in parser", plan.Title);
+    }
+
+    [Fact]
+    public void A_value_starting_with_at_gets_a_human_message_not_yamls_cryptic_one()
+    {
+        var ex = Assert.Throws<VaultSchemaException>(() =>
+            PlanParser.Parse(ValidTextWith("title: @scoped/package support"), "/vault/Plans/recipe-tagging/recipe-tagging.md"));
+
+        Assert.Contains("cannot start a plain value with '@'", ex.Message);
+    }
+
+    [Fact]
+    public void Block_scalar_titles_and_multiline_criteria_are_rejected()
+    {
+        // BF-14 §2 (probe-confirmed): multi-line scalars parsed fine and broke bullet
+        // rendering, the byte-exact echo, and (for base_branch) git itself.
+        var blockTitle = ValidTextWith("title: |\n  Two\n  lines");
+        var ex = Assert.Throws<VaultSchemaException>(() =>
+            PlanParser.Parse(blockTitle, "/vault/Plans/recipe-tagging/recipe-tagging.md"));
+        Assert.Contains("single line", ex.Message);
+    }
+
+    [Fact]
+    public void A_BOM_is_named_instead_of_the_generic_delimiter_error()
+    {
+        var ex = Assert.Throws<VaultSchemaException>(() =>
+            PlanParser.Parse("\uFEFF" + ValidTextWith("title: t"), "/vault/Plans/recipe-tagging/recipe-tagging.md"));
+
+        Assert.Contains("byte-order mark", ex.Message);
+    }
+
+    [Fact]
+    public void Invariant_lint_flags_contradictions_without_refusing()
+    {
+        var plan = PlanParser.Parse(
+            ValidTextWith("title: t").Replace("status: approved", "status: complete"),
+            "/vault/Plans/recipe-tagging/recipe-tagging.md");
+
+        var warnings = PlanParser.LintInvariants(plan);
+
+        Assert.Contains(warnings, w => w.Contains("says complete but has non-complete"));
+    }
 }

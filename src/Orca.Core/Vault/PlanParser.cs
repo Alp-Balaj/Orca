@@ -11,6 +11,9 @@ public static class PlanParser
 {
     public static Plan Parse(string fileText, string filePath)
     {
+        // BF-14 §1: hand-editor traps caught as clear errors before YAML gets a say.
+        FrontmatterLint.Check(fileText, filePath);
+
         var (root, body) = Frontmatter.Parse(fileText, filePath);
         var fm = new MappingReader(root, filePath, "frontmatter");
 
@@ -117,5 +120,28 @@ public static class PlanParser
         }
 
         return checkpoints;
+    }
+
+    /// <summary>BF-14 §3: cheap cross-invariant warnings — hand-edited nonsense states
+    /// that parse cleanly but contradict themselves. Warnings, not refusals, to keep
+    /// hand-editing friendly; `orca status` surfaces them.</summary>
+    public static IReadOnlyList<string> LintInvariants(Plan plan)
+    {
+        var warnings = new List<string>();
+
+        if (plan.Status == PlanStatus.Complete
+            && plan.Checkpoints.Any(c => c.Status != CheckpointStatus.Complete))
+            warnings.Add($"plan '{plan.PlanId}' says complete but has non-complete checkpoints");
+
+        var inProgress = plan.Checkpoints.Where(c => c.Status == CheckpointStatus.InProgress).ToList();
+        if (inProgress.Count > 1)
+            warnings.Add(
+                $"plan '{plan.PlanId}' has {inProgress.Count} checkpoints in_progress at once " +
+                $"({string.Join(", ", inProgress.Select(c => c.Id))}) — Orca runs one at a time");
+
+        if (plan.Updated < plan.Created)
+            warnings.Add($"plan '{plan.PlanId}': updated ({plan.Updated:yyyy-MM-dd}) is before created ({plan.Created:yyyy-MM-dd})");
+
+        return warnings;
     }
 }

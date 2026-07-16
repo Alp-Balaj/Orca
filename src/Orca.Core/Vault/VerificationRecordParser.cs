@@ -14,6 +14,11 @@ public static class VerificationRecordParser
         var fm = new MappingReader(root, filePath, "frontmatter");
 
         var schemaVersion = fm.RequireInt("schema_version");
+        // BF-14 §4: version first, like PlanParser — a future v2 record must error
+        // "unsupported schema_version", never "unknown key(s)".
+        if (schemaVersion != VaultSchema.Version)
+            throw new VaultSchemaException(filePath,
+                $"unsupported schema_version {schemaVersion}; this build of Orca supports version {VaultSchema.Version}");
         var planId = fm.RequireString("plan_id");
         var planVersion = fm.RequireInt("plan_version");
         var checkpointId = fm.RequireString("checkpoint_id");

@@ -19,6 +19,16 @@ public static class PlanScaffold
         VaultLayout.ValidatePlanId(planId);
         if (string.IsNullOrWhiteSpace(title))
             throw new ArgumentException("title must be non-empty", nameof(title));
+        // BF-14 §2: these values are structurally one line downstream — prompt bullets,
+        // the Verifier's byte-exact echo, git branch names. YamlEmit could round-trip a
+        // newline faithfully (BF-04), but a faithful round-trip into a value that breaks
+        // every consumer is worse than a loud refusal here, before anything is written.
+        if (title.Contains('\n') || title.Contains('\r'))
+            throw new ArgumentException("title must be a single line", nameof(title));
+        if (targetRepoName.Contains('\n') || targetRepoName.Contains('\r'))
+            throw new ArgumentException("target repo name must be a single line", nameof(targetRepoName));
+        if (baseBranch.Contains('\n') || baseBranch.Contains('\r'))
+            throw new ArgumentException("base branch must be a single line", nameof(baseBranch));
         if (string.IsNullOrWhiteSpace(targetRepoName))
             throw new ArgumentException("target repo name must be non-empty", nameof(targetRepoName));
         if (string.IsNullOrWhiteSpace(baseBranch))
