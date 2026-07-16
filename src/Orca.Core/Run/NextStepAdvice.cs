@@ -8,8 +8,16 @@ namespace Orca.Core.Run;
 /// completion action.</summary>
 public static class NextStepAdvice
 {
-    public static Checkpoint? NextPending(Plan plan) =>
-        plan.Checkpoints.FirstOrDefault(c => c.Status == CheckpointStatus.Pending);
+    /// <summary>The first READY pending checkpoint — pending with every effective
+    /// dependency complete (SUG-03 stage A) — falling back to the first pending when
+    /// nothing is ready, so the advice can still name what everyone is waiting on.</summary>
+    public static Checkpoint? NextPending(Plan plan)
+    {
+        var ready = CheckpointGraph.ReadySet(plan);
+        return ready.Count > 0
+            ? ready[0]
+            : plan.Checkpoints.FirstOrDefault(c => c.Status == CheckpointStatus.Pending);
+    }
 
     /// <summary>The checkpoint SUG-16 proposal A's "run it now?" offer should name, or
     /// null when there's nothing genuinely new to chain to: either every checkpoint is

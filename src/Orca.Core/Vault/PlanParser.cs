@@ -111,9 +111,35 @@ public static class PlanParser
             if (maxBudgetUsd is <= 0)
                 throw new VaultSchemaException(filePath,
                     $"checkpoint '{id}': max_budget_usd, when set, must be positive, got {maxBudgetUsd}");
+
+            // SUG-03 stage A: optional depends_on — absent means the flat list's implied
+            // default (the previous checkpoint), [] means an explicit parallel root.
+            // Every named dependency must be an EARLIER checkpoint: numbering stays
+            // presentation order, depends_on is the truth, and backward-only edges make
+            // cycles structurally impossible rather than needing detection.
+            IReadOnlyList<string>? dependsOn = null;
+            if (cp.Has("depends_on"))
+            {
+                dependsOn = cp.RequireStringListAllowEmpty("depends_on");
+                var dupes = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var dep in dependsOn)
+                {
+                    if (string.Equals(dep, id, StringComparison.Ordinal))
+                        throw new VaultSchemaException(filePath,
+                            $"checkpoint '{id}': depends_on must not name the checkpoint itself");
+                    if (!seen.Contains(dep))
+                        throw new VaultSchemaException(filePath,
+                            $"checkpoint '{id}': depends_on names '{dep}', which is not an earlier checkpoint " +
+                            "in this plan — dependencies may only point backwards in list order");
+                    if (!dupes.Add(dep))
+                        throw new VaultSchemaException(filePath,
+                            $"checkpoint '{id}': depends_on names '{dep}' more than once");
+                }
+            }
+
             cp.ThrowIfUnknownKeys();
 
-            checkpoints.Add(new Checkpoint(id, description, status, criteria, model, maxBudgetUsd));
+            checkpoints.Add(new Checkpoint(id, description, status, criteria, model, maxBudgetUsd, dependsOn));
         }
 
         return checkpoints;

@@ -120,4 +120,80 @@ public class PlanParserTests
         Assert.Contains(expectedMessagePart, ex.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(fixture, ex.FilePath, StringComparison.OrdinalIgnoreCase);
     }
+
+    // --- SUG-03 stage A: depends_on ---
+
+    private static string PlanWithCheckpoints(string checkpointsYaml) => $"""
+        ---
+        schema_version: 1
+        plan_id: recipe-tagging
+        plan_version: 1
+        title: "Recipe tagging"
+        status: approved
+        target_repo: "RecipeApp"
+        base_branch: "main"
+        created: 2026-07-06T14:00:00Z
+        updated: 2026-07-06T14:00:00Z
+        planning:
+          strategy: single_candidate
+        checkpoints:
+        {checkpointsYaml}
+        ---
+
+        Body.
+        """;
+
+    private static Plan ParseText(string text) => PlanParser.Parse(text, "/vault/Plans/recipe-tagging/recipe-tagging.md");
+
+    [Fact]
+    public void Depends_on_parses_including_the_explicit_empty_list()
+    {
+        var plan = ParseText(PlanWithCheckpoints("""
+              - id: 01-a
+                description: a
+                status: pending
+                acceptance_criteria: [works]
+              - id: 02-b
+                description: b
+                status: pending
+                acceptance_criteria: [works]
+                depends_on: []
+              - id: 03-c
+                description: c
+                status: pending
+                acceptance_criteria: [works]
+                depends_on: [01-a, 02-b]
+            """));
+
+        Assert.Null(plan.Checkpoints[0].DependsOn);
+        Assert.Equal([], plan.Checkpoints[1].DependsOn);
+        Assert.Equal(["01-a", "02-b"], plan.Checkpoints[2].DependsOn);
+    }
+
+    [Theory]
+    [InlineData("depends_on: [02-b]", "must not name the checkpoint itself")]
+    [InlineData("depends_on: [99-nope]", "not an earlier checkpoint")]
+    [InlineData("depends_on: [03-c]", "not an earlier checkpoint")]
+    [InlineData("depends_on: [01-a, 01-a]", "more than once")]
+    public void Depends_on_violations_are_rejected_with_the_reason(string dependsLine, string reason)
+    {
+        var text = PlanWithCheckpoints($"""
+              - id: 01-a
+                description: a
+                status: pending
+                acceptance_criteria: [works]
+              - id: 02-b
+                description: b
+                status: pending
+                acceptance_criteria: [works]
+                {dependsLine}
+              - id: 03-c
+                description: c
+                status: pending
+                acceptance_criteria: [works]
+            """);
+
+        var ex = Assert.Throws<VaultSchemaException>(() => ParseText(text));
+        Assert.Contains(reason, ex.Message);
+    }
 }
