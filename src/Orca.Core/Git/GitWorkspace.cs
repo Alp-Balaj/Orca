@@ -164,6 +164,32 @@ public sealed class GitWorkspace
             $"git merge-base --is-ancestor {ancestor} {descendant} exited {result.ExitCode}: {result.Stderr.Trim()}");
     }
 
+    /// <summary>Fast-forwards <paramref name="baseBranch"/> to <paramref name="branch"/> —
+    /// the only merge shape chaining performs (SUG-16), and only once the human has
+    /// confirmed "run next now?" after an Approve. False (no exception) when the base
+    /// branch moved since the checkpoint branched, so a fast-forward is impossible —
+    /// chaining must not proceed to the next checkpoint in that case (Prepare's own
+    /// unmerged-base guard would refuse it anyway, with a worse message); the human
+    /// resolves it manually. Never creates a merge commit or forces history. Leaves
+    /// <paramref name="baseBranch"/> checked out on either outcome.</summary>
+    public bool TryFastForwardMerge(string branch, string baseBranch)
+    {
+        if (!IsClean())
+            throw new GitException(
+                $"working tree at {RepoRoot} is not clean — refusing to merge over uncommitted changes");
+
+        GitProcess.Run(RepoRoot, ["switch", baseBranch]);
+        // Empirically verified (git 2.54.0): a genuine divergence exits 128 ("Not
+        // possible to fast-forward, aborting"), not 1 — 1 is reserved for a bad ref
+        // ("not something we can merge"), a caller error this method does not expect to
+        // hit and should not swallow.
+        var result = GitProcess.Run(RepoRoot, ["merge", "--ff-only", branch], allowNonZero: true);
+        if (result.ExitCode is 0 or 128)
+            return result.ExitCode == 0;
+        throw new GitException(
+            $"git merge --ff-only {branch} into {baseBranch} exited {result.ExitCode}: {result.Stderr.Trim()}");
+    }
+
     /// <summary>Creates <paramref name="branch"/> at <paramref name="baseBranch"/> and
     /// switches to it. Refuses on a dirty tree — launching a checkpoint onto uncommitted
     /// work is exactly what §7.1 forbids — and refuses to reuse an existing branch

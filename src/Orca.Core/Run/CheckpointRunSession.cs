@@ -272,6 +272,20 @@ public sealed class CheckpointRunSession(
     private string NextStep(CheckpointRunPreview preview) =>
         NextStepAdvice.Describe(new VaultReader(_layout).ReadPlan(preview.Plan.PlanId), preview.Branch);
 
+    /// <summary>SUG-16 proposal A: the checkpoint a "run it now?" offer should name after
+    /// <paramref name="decidedPreview"/>'s Approve, or null when there's nothing genuinely
+    /// new to chain to. Re-reads the plan for the same reason <see cref="NextStep"/> does.</summary>
+    public Checkpoint? ChainCandidate(CheckpointRunPreview decidedPreview) =>
+        NextStepAdvice.ChainCandidate(
+            new VaultReader(_layout).ReadPlan(decidedPreview.Plan.PlanId), decidedPreview.Checkpoint.Id);
+
+    /// <summary>Fast-forwards the plan's base branch to the just-approved checkpoint
+    /// branch — the one merge chaining ever performs, only once the human has confirmed
+    /// "run next now?". False when that isn't possible (the base branch moved since the
+    /// checkpoint branched); the caller must not proceed to the next checkpoint then.</summary>
+    public bool MergeApprovedBranch(CheckpointRunPreview decidedPreview) =>
+        workspace.TryFastForwardMerge(decidedPreview.Branch, decidedPreview.Plan.BaseBranch);
+
     private CheckpointDecisionContext Context(
         CheckpointRunPreview preview,
         CheckpointRunOutcome? run,

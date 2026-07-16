@@ -47,25 +47,55 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
         var workspace = GitWorkspace.Discover(settings.Repo ?? Directory.GetCurrentDirectory());
         var config = ConfigLoader.Load(workspace.RepoRoot);
         var session = new CheckpointRunSession(config, workspace, new ClaudeCodeExecutor());
+        var interactive = ConsoleInteractivity.Detect();
 
-        var preview = session.Prepare(
-            settings.Plan, settings.Checkpoint,
-            settings.OverrideCompleteByEvidence, settings.OverrideUnmergedBase);
-        CheckpointRenderer.RenderPreview(preview);
-
-        if (settings.DryRun)
+        // SUG-16 proposal A: after an Approve, offer to launch the next checkpoint in the
+        // same session — the only thing this loop automates is *launching*, never
+        // *deciding*; every checkpoint still stops at ExecuteAsync for its own gate.
+        string? planId = settings.Plan;
+        string? checkpointId = settings.Checkpoint;
+        while (true)
         {
-            CheckpointRenderer.RenderDryRun(preview);
-            return 0;
-        }
+            var preview = session.Prepare(
+                planId, checkpointId, settings.OverrideCompleteByEvidence, settings.OverrideUnmergedBase);
+            CheckpointRenderer.RenderPreview(preview);
 
-        if (preview.PendingDecision)
+            if (settings.DryRun)
+            {
+                CheckpointRenderer.RenderDryRun(preview);
+                return 0;
+            }
+
+            if (preview.PendingDecision)
+                AnsiConsole.MarkupLine(
+                    $"[yellow]attempt {preview.Attempt - 1} is still awaiting your decision[/] — reviewing it now instead of launching a new invocation.");
+
+            var gate = new SpectreCheckpointGate(interactive);
+            var result = await session.ExecuteAsync(preview, gate);
+            var exitCode = Render(result, gate);
+
+            if (result.Outcome != CheckpointSessionOutcome.Approved || !interactive)
+                return exitCode;
+
+            var next = session.ChainCandidate(result.Preview);
+            if (next is null || !AnsiConsole.Confirm(
+                $"next: '{next.Id.EscapeMarkup()}' — {next.Description.EscapeMarkup()}. Run it now?"))
+                return exitCode;
+
+            if (!session.MergeApprovedBranch(result.Preview))
+            {
+                AnsiConsole.MarkupLine(
+                    $"[yellow]could not fast-forward[/] '{result.Preview.Plan.BaseBranch.EscapeMarkup()}' to " +
+                    $"'{result.Preview.Branch.EscapeMarkup()}' — it moved since the checkpoint branched. " +
+                    "Merge manually, then re-run checkpoint-run.");
+                return exitCode;
+            }
+
             AnsiConsole.MarkupLine(
-                $"[yellow]attempt {preview.Attempt - 1} is still awaiting your decision[/] — reviewing it now instead of launching a new invocation.");
-
-        var gate = new SpectreCheckpointGate(ConsoleInteractivity.Detect());
-        var result = await session.ExecuteAsync(preview, gate);
-        return Render(result, gate);
+                $"[green]merged[/] '{result.Preview.Branch.EscapeMarkup()}' into '{result.Preview.Plan.BaseBranch.EscapeMarkup()}'");
+            planId = result.Preview.Plan.PlanId;
+            checkpointId = next.Id;
+        }
     }
 
     internal static int Render(CheckpointSessionResult result, SpectreCheckpointGate gate)

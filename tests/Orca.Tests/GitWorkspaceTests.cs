@@ -113,6 +113,45 @@ public sealed class GitWorkspaceTests : IDisposable
     }
 
     [Fact]
+    public void TryFastForwardMerge_advances_the_base_branch_when_possible()
+    {
+        var workspace = Workspace();
+        workspace.CreateBranchFrom("orca/p/01-c", "main");
+        _repo.WriteFile("src/Feature.cs", "// new\n");
+        var sha = workspace.StageAllAndCommit("orca: p/01-c attempt 1");
+
+        var merged = workspace.TryFastForwardMerge("orca/p/01-c", "main");
+
+        Assert.True(merged);
+        Assert.Equal("main", workspace.CurrentBranch());
+        Assert.Equal(sha, _repo.Git("rev-parse", "main").Trim());
+        Assert.True(File.Exists(Path.Combine(_repo.Root, "src/Feature.cs")));
+    }
+
+    [Fact]
+    public void TryFastForwardMerge_refuses_without_altering_history_when_base_has_diverged()
+    {
+        var workspace = Workspace();
+        workspace.CreateBranchFrom("orca/p/01-c", "main");
+        _repo.WriteFile("src/Feature.cs", "// new\n");
+        var checkpointSha = workspace.StageAllAndCommit("orca: p/01-c attempt 1");
+
+        // main moves on independently — a second machine, or the human committing
+        // something else — before the human confirms "run next now?".
+        workspace.SwitchTo("main");
+        _repo.WriteFile("README.md", "seed\ndiverged on main\n");
+        var mainSha = workspace.StageAllAndCommit("unrelated change on main");
+
+        var merged = workspace.TryFastForwardMerge("orca/p/01-c", "main");
+
+        Assert.False(merged);
+        Assert.Equal("main", workspace.CurrentBranch());
+        Assert.Equal(mainSha, _repo.Git("rev-parse", "main").Trim());
+        Assert.Equal(checkpointSha, _repo.Git("rev-parse", "orca/p/01-c").Trim());
+        Assert.True(workspace.IsClean());
+    }
+
+    [Fact]
     public void Discard_removes_tracked_modifications_and_untracked_files()
     {
         var workspace = Workspace();

@@ -558,6 +558,114 @@ public sealed class CheckpointRunSessionTests : IDisposable
         Assert.NotNull(new RunStateStore(_repo.Root).Read("recipe-tagging"));
     }
 
+    [Fact]
+    public async Task Chaining_offers_the_next_checkpoint_and_the_merge_unblocks_it()
+    {
+        // SUG-16 proposal A, end to end: a separate, isolated two-checkpoint plan (the
+        // shared PlanText fixture carries only one — extending it would break the
+        // existing IsLastCheckpoint assertions elsewhere in this file).
+        CommitOrcaIgnore();
+        var vault = Directory.CreateTempSubdirectory("orca-vault-chain-test-").FullName;
+        try
+        {
+            var planDir = Path.Combine(vault, "Plans", "chain-plan");
+            Directory.CreateDirectory(planDir);
+            File.WriteAllText(Path.Combine(planDir, "chain-plan.md"), """
+                ---
+                schema_version: 1
+                plan_id: chain-plan
+                plan_version: 1
+                title: Chain plan
+                status: approved
+                target_repo: RecipeApp
+                base_branch: main
+                created: 2026-07-06T14:00:00Z
+                updated: 2026-07-06T14:00:00Z
+                planning:
+                  strategy: single_candidate
+                checkpoints:
+                  - id: 01-first
+                    description: First checkpoint
+                    status: pending
+                    acceptance_criteria:
+                      - It works
+                  - id: 02-second
+                    description: Second checkpoint
+                    status: pending
+                    acceptance_criteria:
+                      - It also works
+                ---
+                Plan body.
+                """);
+
+            var stagingDir = Path.Combine(planDir, ".staging");
+            var config = Config() with { VaultRoot = vault };
+            var executor = new ScriptedExecutor();
+            executor.Enqueue(ScriptedExecutor.Success,
+                () => _repo.WriteFile("src/First.cs", "// first\n"));
+            executor.Enqueue(ScriptedExecutor.Success,
+                () => WriteStaging(Path.Combine(stagingDir, "01-first.attempt-1.reconciliation.md"), """
+                    ---
+                    schema_version: 1
+                    plan_id: chain-plan
+                    plan_version: 1
+                    checkpoint_id: 01-first
+                    attempt: 1
+                    implements_plan: full
+                    missing: []
+                    extra: []
+                    ---
+                    Complete.
+                    """));
+            executor.Enqueue(ScriptedExecutor.Success,
+                () => WriteStaging(Path.Combine(stagingDir, "01-first.attempt-1.semantic.md"), """
+                    ---
+                    schema_version: 1
+                    plan_id: chain-plan
+                    plan_version: 1
+                    checkpoint_id: 01-first
+                    attempt: 1
+                    criteria:
+                      - criterion: "It works"
+                        verdict: pass
+                    ---
+                    Looks right.
+                    """));
+
+            var session = new CheckpointRunSession(config, GitWorkspace.Discover(_repo.Root), executor);
+            var gate = new ScriptedGate
+            {
+                Decision = new CheckpointDecision { Choice = CheckpointChoice.Approve, MarkCheckpointComplete = true },
+            };
+
+            var result = await session.ExecuteAsync(session.Prepare("chain-plan", null), gate);
+            Assert.Equal(CheckpointSessionOutcome.Approved, result.Outcome);
+
+            var next = session.ChainCandidate(result.Preview);
+            Assert.Equal("02-second", next?.Id);
+
+            // Before the merge, Prepare for checkpoint 2 refuses — its base branch doesn't
+            // have checkpoint 1's approved commit yet.
+            var beforeMerge = Assert.Throws<CheckpointRunException>(
+                () => session.Prepare("chain-plan", "02-second"));
+            Assert.Contains("not yet merged", beforeMerge.Message);
+
+            Assert.True(session.MergeApprovedBranch(result.Preview));
+
+            // After the merge, Prepare for checkpoint 2 succeeds cleanly — chaining's whole
+            // point: no --override-unmerged-base needed, and nothing re-paid to get here.
+            var nextPreview = session.Prepare("chain-plan", "02-second");
+            Assert.Equal("02-second", nextPreview.Checkpoint.Id);
+            // 3 invocations total (Implementer + Reconciler + Verifier) — both Prepare
+            // calls and the merge spent nothing further.
+            Assert.Equal(3, executor.Invocations);
+        }
+        finally
+        {
+            Directory.Delete(vault, recursive: true);
+        }
+    }
+
     /// <summary>Attempt 1 that ended VerificationIncomplete: Implementer changes on the
     /// checkpoint branch, run state written, no verification record — the resumable
     /// pending state every resume test starts from.</summary>
