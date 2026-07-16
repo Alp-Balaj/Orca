@@ -46,6 +46,14 @@ public sealed class VaultReader(VaultLayout layout)
         var records = new List<VerificationRecord>();
         foreach (var file in Directory.EnumerateFiles(directory, $"{checkpointId}.attempt-*.md"))
         {
+            // BF-09 §1: the glob also matches sync-tool artifacts
+            // ("….attempt-1.sync-conflict-….md"), whose parse used to brick the plan
+            // until hand-deleted. Only exact record names are records; foreign files
+            // are skipped here and surfaced by `orca doctor`'s sync-artifact scan.
+            if (!System.Text.RegularExpressions.Regex.IsMatch(
+                    Path.GetFileName(file), $@"^{System.Text.RegularExpressions.Regex.Escape(checkpointId)}\.attempt-[0-9]+\.md$"))
+                continue;
+
             var record = VerificationRecordParser.Parse(File.ReadAllText(file), file);
             if (!string.Equals(record.PlanId, planId, StringComparison.Ordinal))
                 throw new VaultSchemaException(file,
@@ -77,6 +85,14 @@ public sealed class VaultReader(VaultLayout layout)
         var records = new List<ReconciliationRecord>();
         foreach (var file in Directory.EnumerateFiles(directory, $"{checkpointId}.attempt-*.md"))
         {
+            // BF-09 §1: the glob also matches sync-tool artifacts
+            // ("….attempt-1.sync-conflict-….md"), whose parse used to brick the plan
+            // until hand-deleted. Only exact record names are records; foreign files
+            // are skipped here and surfaced by `orca doctor`'s sync-artifact scan.
+            if (!System.Text.RegularExpressions.Regex.IsMatch(
+                    Path.GetFileName(file), $@"^{System.Text.RegularExpressions.Regex.Escape(checkpointId)}\.attempt-[0-9]+\.md$"))
+                continue;
+
             var record = ReconciliationRecordParser.Parse(File.ReadAllText(file), file);
             if (!string.Equals(record.PlanId, planId, StringComparison.Ordinal))
                 throw new VaultSchemaException(file,

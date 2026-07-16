@@ -137,4 +137,14 @@ public sealed class SemanticChecklistTests
 
         Assert.Contains("expected pass|fail|unclear", ex.Message);
     }
+
+    [Fact]
+    public void Staging_parse_accepts_CRLF_output_from_a_windows_machine()
+    {
+        // BF-09 §5: nothing kept the CRLF shape working until now.
+        var checklist = SemanticChecklistParser.ParseStaging(
+            ValidText.ReplaceLineEndings("\r\n"), "01-tag-entity.attempt-1.semantic.md", Identity, Criteria);
+
+        Assert.NotEmpty(checklist.Criteria);
+    }
 }

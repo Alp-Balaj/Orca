@@ -381,4 +381,28 @@ public sealed class ConfigLoaderTests : IDisposable
 
         Assert.Null(ConfigLoader.Load(repo, GlobalWithVault()).GateTimeout);
     }
+
+    [Fact]
+    public void Backslashes_in_plans_dir_are_rejected_identically_on_both_machines()
+    {
+        // BF-09 §4: a backslashed plansDir works on Windows and silently becomes one
+        // literal directory name on Linux.
+        var global = WriteGlobalConfig($$"""
+            {
+              "schemaVersion": 1,
+              "vaults": { "brian-the-brain": {{System.Text.Json.JsonSerializer.Serialize(Path.Combine(_root, "vault"))}} }
+            }
+            """);
+        var repoPath = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Orca\\Repo\\Plans" },
+              "commands": { "build": ["b"], "test": ["t"] }
+            }
+            """);
+
+        var e = Assert.Throws<ConfigException>(() => ConfigLoader.Load(repoPath, global));
+        Assert.Contains("contains backslashes", e.Message);
+        Assert.Contains("forward slashes", e.Message);
+    }
 }

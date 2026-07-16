@@ -17,7 +17,9 @@ public static class ReconciliationRecordParser
 
         var expectedName = $"{record.CheckpointId}.attempt-{record.Attempt}.md";
         if (!string.Equals(Path.GetFileName(filePath), expectedName, StringComparison.Ordinal))
-            throw new VaultSchemaException(filePath, $"file name must be '{expectedName}' to match its frontmatter");
+            throw new VaultSchemaException(filePath,
+                $"file name must be '{expectedName}' to match its frontmatter — if this file was created " +
+                "by a sync tool (a '.sync-conflict-' or ' (1)' copy), resolve the conflict and delete the copy");
 
         return record;
     }

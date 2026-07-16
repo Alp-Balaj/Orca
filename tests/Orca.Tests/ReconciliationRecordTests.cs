@@ -217,4 +217,24 @@ public sealed class ReconciliationRecordTests
             Directory.Delete(vault, recursive: true);
         }
     }
+
+    [Fact]
+    public void Filename_mismatch_error_names_the_sync_tool_trap()
+    {
+        var ex = Assert.Throws<VaultSchemaException>(() =>
+            ReconciliationRecordParser.Parse(ValidText, "01-tag-entity.attempt-2.sync-conflict-20260716.md"));
+
+        Assert.Contains("sync tool", ex.Message);
+    }
+
+    [Fact]
+    public void Staging_parse_accepts_CRLF_output_from_a_windows_machine()
+    {
+        // BF-09 §5: committed fixtures are LF-normalized, so the shape a Windows-machine
+        // Claude actually writes had no test keeping it working.
+        var record = ReconciliationRecordParser.ParseStaging(
+            ValidText.ReplaceLineEndings("\r\n"), "01-tag-entity.attempt-2.reconciliation.md", Identity);
+
+        Assert.Equal(2, record.Attempt);
+    }
 }

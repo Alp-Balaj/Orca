@@ -50,7 +50,9 @@ public static class VerificationRecordParser
 
         var expectedName = $"{checkpointId}.attempt-{attempt}.md";
         if (!string.Equals(Path.GetFileName(filePath), expectedName, StringComparison.Ordinal))
-            throw new VaultSchemaException(filePath, $"file name must be '{expectedName}' to match its frontmatter");
+            throw new VaultSchemaException(filePath,
+                $"file name must be '{expectedName}' to match its frontmatter — if this file was created " +
+                "by a sync tool (a '.sync-conflict-' or ' (1)' copy), resolve the conflict and delete the copy");
 
         var record = new VerificationRecord(
             schemaVersion, planId, planVersion, checkpointId, attempt, timestamp,
