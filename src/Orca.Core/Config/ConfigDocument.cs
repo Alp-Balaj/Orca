@@ -66,6 +66,10 @@ public sealed record RolesSection
     public RoleSection? Implementer { get; init; }
     public RoleSection? Reconciler { get; init; }
     public RoleSection? Verifier { get; init; }
+
+    /// <summary>SUG-09: optional — absent means the post-approve session-note offer
+    /// never appears; every other command is unaffected.</summary>
+    public RoleSection? Summarizer { get; init; }
 }
 
 /// <summary>Per-role executor settings; maps 1:1 onto <c>ClaudeInvocationOptions</c>.

@@ -99,6 +99,16 @@ public static class OrcaConfigScaffold
                     model = "sonnet",
                     maxBudgetUsd = 2,
                 },
+                // SUG-09: the post-approve session-note distiller — haiku over a
+                // filtered transcript is cents, and it only runs when a human says yes.
+                summarizer = new
+                {
+                    allowedTools = new[] { "Read", "Write", "Edit" },
+                    maxTurns = 10,
+                    timeoutSeconds = 300,
+                    model = "haiku",
+                    maxBudgetUsd = 1,
+                },
             },
         };
 

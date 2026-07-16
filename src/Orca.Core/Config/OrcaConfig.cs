@@ -8,6 +8,9 @@ public enum RoleName
     Implementer,
     Reconciler,
     Verifier,
+    /// <summary>SUG-09: the post-approve session-note distiller. Optional — a repo
+    /// without <c>roles.summarizer</c> simply never offers the note.</summary>
+    Summarizer,
 }
 
 /// <summary>The merged, resolved configuration one run works from: target-repo
@@ -75,6 +78,7 @@ public sealed record OrcaConfig
             RoleName.Implementer => RoleSections.Implementer,
             RoleName.Reconciler => RoleSections.Reconciler,
             RoleName.Verifier => RoleSections.Verifier,
+            RoleName.Summarizer => RoleSections.Summarizer,
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
         };
 
@@ -111,6 +115,7 @@ public sealed record OrcaConfig
         RoleName.Implementer => "implementer",
         RoleName.Reconciler => "reconciler",
         RoleName.Verifier => "verifier",
+        RoleName.Summarizer => "summarizer",
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
     };
 }
