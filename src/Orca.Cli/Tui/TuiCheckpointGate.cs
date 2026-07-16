@@ -99,6 +99,13 @@ internal sealed class TuiCheckpointGate(Action flushPending) : ICheckpointGate
                     ],
                     new TuiModal.Choice<bool>(Key.Y, "y discard", true),
                     new TuiModal.Choice<bool>(Key.N, "n keep", false)),
+                // SUG-11 §4: the one-line why. Optional — esc skips — but without it a
+                // rejection of a green attempt reaches the retry with no usable signal.
+                RejectionNote = TuiInput.AskLine("why? (rides the next attempt's prompt)",
+                    [
+                        StyledLine.Plain("One line on why this attempt did not stand.", TuiRole.Text),
+                        StyledLine.Plain("Saved to the vault next to the records; the next attempt is prompted with it.", TuiRole.Dim),
+                    ]),
             },
             _ => new CheckpointDecision { Choice = CheckpointChoice.Defer },
         };

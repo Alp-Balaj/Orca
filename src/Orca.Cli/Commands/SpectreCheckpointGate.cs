@@ -100,7 +100,17 @@ internal sealed class SpectreCheckpointGate(bool interactive) : ICheckpointGate
             var discard = AnsiConsole.Prompt(new ConfirmationPrompt(
                     $"Hard-reset [bold]{context.Preview.Branch.EscapeMarkup()}[/], discarding ALL uncommitted changes (including new files)?")
                 { DefaultValue = false });
-            return Task.FromResult(new CheckpointDecision { Choice = CheckpointChoice.Reject, DiscardChanges = discard });
+            // SUG-11 §4: the one-line why — optional (enter skips), saved to the vault
+            // and carried into the next attempt's prompt.
+            var note = AnsiConsole.Prompt(new TextPrompt<string>(
+                    "Why? One line for the next attempt's prompt (enter to skip):")
+                .AllowEmpty());
+            return Task.FromResult(new CheckpointDecision
+            {
+                Choice = CheckpointChoice.Reject,
+                DiscardChanges = discard,
+                RejectionNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+            });
         }
 
         return Task.FromResult(new CheckpointDecision { Choice = CheckpointChoice.Defer });

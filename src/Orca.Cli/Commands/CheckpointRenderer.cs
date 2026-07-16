@@ -50,9 +50,13 @@ internal static class CheckpointRenderer
         {
             table.AddRow("verdict", r.IsError ? $"[red]error ({r.Subtype.EscapeMarkup()})[/]" : "success");
             // On failure the CLI's own words beat any paraphrase — a wrong model id, a
-            // logged-out machine, a budget kill all explain themselves here.
-            if (r.IsError && r.ResultText is { } text)
-                table.AddRow("claude says", text.EscapeMarkup());
+            // logged-out machine, a budget kill all explain themselves here. On success
+            // the same text is the Implementer's own summary of what it did (or exactly
+            // why it stopped early on a blocked criterion) — the human deciding
+            // approve/reject should see what the agent said, not have it discarded
+            // (SUG-11 §3).
+            if (r.ResultText is { } text)
+                table.AddRow(r.IsError ? "claude says" : "summary", text.EscapeMarkup());
             table.AddRow("turns / duration", $"{r.NumTurns} / {TimeSpan.FromMilliseconds(r.DurationMs)}");
             table.AddRow("cost", $"${r.TotalCostUsd}");
             table.AddRow("tokens in/out", $"{r.Usage.InputTokens}/{r.Usage.OutputTokens}");

@@ -111,7 +111,8 @@ internal static class TuiTestData
 
     public static ClaudeExecutionResult MakeExecution(
         decimal cost = 0.5m, int turns = 12, long durationMs = 63_000,
-        bool error = false, ExecutionOutcome outcome = ExecutionOutcome.Completed)
+        bool error = false, ExecutionOutcome outcome = ExecutionOutcome.Completed,
+        string? resultText = null)
         => new()
         {
             Outcome = outcome,
@@ -132,7 +133,7 @@ internal static class TuiTestData
                     CacheCreationInputTokens = 0,
                     CacheReadInputTokens = 0,
                 },
-                ResultText = error ? "Not logged in · Please run /login" : null,
+                ResultText = resultText ?? (error ? "Not logged in · Please run /login" : null),
             },
             Elapsed = TimeSpan.FromMilliseconds(durationMs),
         };

@@ -61,9 +61,13 @@ internal static class RunDecisionText
         if (e.Result is { } r)
         {
             // On failure the CLI's own words beat any paraphrase (a wrong model id, a
-            // logged-out machine, a budget kill all explain themselves here).
-            if (r.IsError && r.ResultText is { } text)
-                lines.Add(StyledLine.Of(new("  claude says  ", TuiRole.Dim), new(text, TuiRole.Text)));
+            // logged-out machine, a budget kill all explain themselves here). On success
+            // the same text is the Implementer's own summary — or exactly why it stopped
+            // early on a blocked criterion — and the human deciding needs it (SUG-11 §3).
+            if (r.ResultText is { } text)
+                lines.Add(StyledLine.Of(
+                    new(r.IsError ? "  claude says  " : "  summary      ", TuiRole.Dim),
+                    new(text, TuiRole.Text)));
             lines.Add(StyledLine.Of(
                 new("  cost         ", TuiRole.Dim),
                 new(Money(r.TotalCostUsd), TuiRole.Text),
