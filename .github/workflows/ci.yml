@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build
+        run: dotnet build Orca.slnx --configuration Release
+
+      - name: Test
+        # No --settings tests/integration.runsettings: CI never spends billed subscription
+        # quota. The root .runsettings' Category!=Integration filter applies by default,
+        # so this excludes the ClaudeCliContractTests same as a local `dotnet test`.
+        run: dotnet test Orca.slnx --configuration Release --no-build

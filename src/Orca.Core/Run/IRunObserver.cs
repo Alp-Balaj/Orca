@@ -26,6 +26,14 @@ public abstract record RunObservation
 
     public sealed record RoleFinished(RoleName Role, ClaudeExecutionResult Execution) : RunObservation;
 
+    /// <summary>The role invocation's claude_code_version didn't match
+    /// <see cref="ClaudeVersionCheck.PinnedVersion"/>, under the default "warn" policy
+    /// (SUG-15) — surfaced so the human running Orca sees it; the attempt is not
+    /// blocked. Under the opt-in "refuse" policy a mismatch stops the attempt instead
+    /// (<c>CheckpointSessionOutcome.ClaudeVersionRefused</c>) and this event is never
+    /// raised for it.</summary>
+    public sealed record ClaudeVersionMismatch(RoleName Role, string Observed, string Pinned) : RunObservation;
+
     /// <summary>A §5.4 parse/validation failure entered the capped Reflexion retry.</summary>
     public sealed record RoleParseRetry(RoleName Role, string Error, int NextInvocation) : RunObservation;
 

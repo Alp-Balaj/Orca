@@ -11,6 +11,7 @@ public enum CheckpointSessionOutcome
     GitignoreAdded,          // stopped before running: commit the .gitignore change, re-run
     InvocationFailed,        // implementer stop reason != succeeded; gate already consulted about partial changes
     NoChanges,               // invocation succeeded but tree is clean — a failed attempt
+    ClaudeVersionRefused,    // observed claude_code_version mismatched the pin under the opt-in refuse policy
     VerificationIncomplete,  // pipeline stopped before a record (auth/rate-limit/budget/timeout/parse ceiling)
     Approved,                // committed; CommitSha is set
     Rejected,                // DiscardedChanges says whether the confirmed reset ran
@@ -134,6 +135,28 @@ public sealed class CheckpointRunSession(
                 Run = run,
                 AttemptCostUsd = run.Execution.Result?.TotalCostUsd,
             };
+        }
+
+        // SUG-15: cheapest to catch right here — before the gates/Reconciler/Verifier
+        // spend anything on an attempt the refuse policy would reject anyway. One check
+        // per attempt (the Implementer's invocation) is enough: every role invocation in
+        // this attempt runs the same installed claude binary in the same session.
+        var versionVerdict = ClaudeVersionCheck.Evaluate(
+            run.Execution.ClaudeCodeVersion, ClaudeVersionCheck.PinnedVersion, config.ClaudeVersionPolicy);
+        if (versionVerdict == ClaudeVersionVerdict.Refuse)
+        {
+            return new CheckpointSessionResult
+            {
+                Outcome = CheckpointSessionOutcome.ClaudeVersionRefused,
+                Preview = preview,
+                Run = run,
+                AttemptCostUsd = run.Execution.Result?.TotalCostUsd,
+            };
+        }
+        if (versionVerdict == ClaudeVersionVerdict.Warn)
+        {
+            observer?.OnRunEvent(new RunObservation.ClaudeVersionMismatch(
+                RoleName.Implementer, run.Execution.ClaudeCodeVersion!, ClaudeVersionCheck.PinnedVersion));
         }
 
         // The pipeline runs automatically after the Implementer — gates first (machine

@@ -85,6 +85,14 @@ public class ClaudeCliContractTests : IDisposable
         Assert.Equal(result.SessionId, state.SessionId);
         Assert.Equal(result.Result.TotalCostUsd, state.AccumulatedCostUsd);
         Assert.Equal(result.Result.Usage, state.LastUsage);
+
+        // SUG-15: the init event's claude_code_version should still equal what this
+        // whole contract test class is pinned against — a captured-but-unchecked field
+        // is exactly the blind spot SUG-15 closes. If this starts failing on a real run,
+        // it means the CLI has drifted (README.md's Status section pins the same value)
+        // and the safe-mode/stream-json contract this class probes needs re-verifying
+        // before bumping ClaudeVersionCheck.PinnedVersion to match.
+        Assert.Equal(ClaudeVersionCheck.PinnedVersion, result.ClaudeCodeVersion);
     }
 
     /// <summary>The real CLI, not a fake, receiving the prompt exclusively over stdin
@@ -115,5 +123,72 @@ public class ClaudeCliContractTests : IDisposable
         Assert.NotNull(result.Result);
         Assert.False(result.Result.IsError);
         Assert.True(result.Result.TotalCostUsd > 0m, "expected a positive USD-equivalent cost — proves the CLI actually processed the stdin-delivered prompt rather than erroring out immediately");
+    }
+
+    /// <summary>Safety layer 2, end to end: a <c>permissions.deny</c> Bash rule must
+    /// survive <c>--safe-mode</c> and actually stop the tool call, not just be present in
+    /// the settings payload. Proved black-box — a file the denied Bash command would have
+    /// created must not exist afterward — rather than by pattern-matching the CLI's own
+    /// denial wording in the event stream, which SUG-15's kickoff flagged as exactly the
+    /// kind of fact this repo had never pinned (a silently-honored-anyway regression would
+    /// only ever be caught by a human noticing something it shouldn't have done).</summary>
+    [ClaudeCliFact]
+    public async Task A_denied_bash_rule_survives_safe_mode_and_actually_blocks_the_tool()
+    {
+        var canary = Path.Combine(_dir, "should-not-exist.txt");
+        var settingsPath = Path.Combine(_dir, "settings.json");
+        File.WriteAllText(settingsPath, PermissionSettings.ToJson(["Bash"]));
+        var paths = new RunLogLayout(_dir).AttemptPaths("orca-build", "04-claude-code-executor", 1);
+        var options = new ClaudeInvocationOptions
+        {
+            // Bash is both allowed (proving deny wins over the allowlist, not merely
+            // absent from it — the exact contract PermissionSettings.cs documents) and
+            // the only tool granted, so there is no other path to the canary file.
+            Prompt = $"Use the Bash tool to run exactly this command: touch {canary}\n" +
+                     "Then reply in one sentence saying whether it succeeded.",
+            WorkingDirectory = _dir,
+            AllowedTools = ["Bash"],
+            MaxTurns = 8,
+            Timeout = TimeSpan.FromMinutes(3),
+            SettingsFilePath = settingsPath,
+        };
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, paths);
+
+        Assert.Equal(ExecutionOutcome.Completed, result.Outcome);
+        Assert.False(File.Exists(canary),
+            "permissions.deny for Bash did not survive --safe-mode — the denied tool call actually ran");
+    }
+
+    /// <summary>The one path today's fake-process-script tests cannot reach: a real
+    /// invocation cancelled mid-flight must kill the whole process tree, drain the
+    /// stdout/stderr pumps to completion (proven by this method returning at all, rather
+    /// than hanging until the 3-minute Timeout ceiling), and rethrow — never fabricate a
+    /// synthetic "succeeded" or "timed out" outcome for a caller-requested cancellation.</summary>
+    [ClaudeCliFact(Timeout = 30_000)]
+    public async Task Cancelling_mid_flight_kills_the_tree_drains_the_pumps_and_rethrows()
+    {
+        File.WriteAllText(
+            Path.Combine(_dir, "README.md"),
+            "Orca is a .NET 10 CLI tool that orchestrates Claude Code as a checkpoint-gated implementer.\n");
+        var paths = new RunLogLayout(_dir).AttemptPaths("orca-build", "04-claude-code-executor", 1);
+        var options = new ClaudeInvocationOptions
+        {
+            Prompt = "Read the file README.md and summarize it in one sentence",
+            WorkingDirectory = _dir,
+            AllowedTools = ["Read"],
+            MaxTurns = 8,
+            // Generous on purpose: cancellation, not this ceiling, must be what fires.
+            Timeout = TimeSpan.FromMinutes(3),
+        };
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(500));
+
+        var ex = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => new ClaudeCodeExecutor().ExecuteAsync(options, paths, cancellationToken: cts.Token));
+
+        Assert.Equal(cts.Token, ex.CancellationToken);
+        // Never a synthetic result event for a killed attempt.
+        Assert.DoesNotContain(File.ReadAllLines(paths.EventLog), l => l.Contains("\"type\":\"result\""));
     }
 }

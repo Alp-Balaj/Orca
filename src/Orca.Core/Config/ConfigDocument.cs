@@ -27,6 +27,11 @@ public sealed record ConfigDocument
     public IReadOnlyList<string>? DeniedTools { get; init; }
     public RolesSection? Roles { get; init; }
     public IReadOnlyDictionary<string, string>? Vaults { get; init; }
+
+    /// <summary>"warn" or "refuse" for what a <c>claude_code_version</c> mismatch against
+    /// Orca's pinned/probed version does (SUG-15). Absent means "warn" — the non-breaking
+    /// default an opinion-free config must keep getting.</summary>
+    public string? ClaudeVersionPolicy { get; init; }
 }
 
 public sealed record VaultSection

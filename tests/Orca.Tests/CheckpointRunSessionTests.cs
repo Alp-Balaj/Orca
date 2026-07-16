@@ -265,6 +265,61 @@ public sealed class CheckpointRunSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_claude_version_mismatch_warns_but_does_not_block_under_the_default_policy()
+    {
+        CommitOrcaIgnore();
+        var executor = GreenPipelineExecutorWithImplementerVersion("9.9.9-test");
+        var observer = new RecordingRunObserver();
+        var gate = new ScriptedGate { Decision = new CheckpointDecision { Choice = CheckpointChoice.Defer } };
+        var session = Session(executor); // default Config() — ClaudeVersionPolicy defaults to Warn
+
+        var result = await session.ExecuteAsync(session.Prepare(null, null), gate, observer);
+
+        // Reached the decision — the mismatch did not stop the pipeline.
+        Assert.Equal(CheckpointSessionOutcome.Deferred, result.Outcome);
+        var mismatch = Assert.Single(observer.Events.OfType<RunObservation.ClaudeVersionMismatch>());
+        Assert.Equal(RoleName.Implementer, mismatch.Role);
+        Assert.Equal("9.9.9-test", mismatch.Observed);
+        Assert.Equal(ClaudeVersionCheck.PinnedVersion, mismatch.Pinned);
+    }
+
+    [Fact]
+    public async Task A_claude_version_mismatch_refuses_under_the_opt_in_policy_before_spending_on_verification()
+    {
+        CommitOrcaIgnore();
+        var executor = new ScriptedExecutor();
+        executor.Enqueue(ScriptedExecutor.Success with { ClaudeCodeVersion = "9.9.9-test" },
+            () => _repo.WriteFile("src/Tag.cs", "public sealed record Tag(string Name);\n"));
+        // Nothing else is scripted — a Reconciler/Verifier invocation attempted here would
+        // throw "invoked more times than scripted", proving the refusal happens first.
+        var session = new CheckpointRunSession(
+            Config() with { ClaudeVersionPolicy = ClaudeVersionPolicy.Refuse },
+            GitWorkspace.Discover(_repo.Root), executor);
+        var gate = new ScriptedGate();
+
+        var result = await session.ExecuteAsync(session.Prepare(null, null), gate);
+
+        Assert.Equal(CheckpointSessionOutcome.ClaudeVersionRefused, result.Outcome);
+        Assert.Empty(gate.Calls); // never reached a decision
+        Assert.Null(result.Verification);
+    }
+
+    /// <summary>Like <see cref="GreenPipelineExecutor"/>, but the Implementer's invocation
+    /// reports <paramref name="claudeCodeVersion"/> instead of leaving it unset — so the
+    /// pipeline still completes green, with a version mismatch riding along.</summary>
+    private ScriptedExecutor GreenPipelineExecutorWithImplementerVersion(string claudeCodeVersion, int attempt = 1)
+    {
+        var executor = new ScriptedExecutor();
+        executor.Enqueue(ScriptedExecutor.Success with { ClaudeCodeVersion = claudeCodeVersion },
+            () => _repo.WriteFile("src/Tag.cs", "public sealed record Tag(string Name);\n"));
+        executor.Enqueue(ScriptedExecutor.Success,
+            () => WriteStaging(StagingReconciliation(attempt), ValidReconciliation(attempt)));
+        executor.Enqueue(ScriptedExecutor.Success,
+            () => WriteStaging(StagingSemantic(attempt), ValidChecklist(attempt)));
+        return executor;
+    }
+
+    [Fact]
     public async Task A_pipeline_stopped_before_a_record_surfaces_as_incomplete_not_a_decision()
     {
         CommitOrcaIgnore();
