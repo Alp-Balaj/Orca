@@ -30,6 +30,10 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
         IClaudeStreamObserver? observer = null,
         CancellationToken cancellationToken = default)
     {
+        // BF-05: a pre-cancelled token must not spawn claude just to kill it — that
+        // burned a process launch and permanently consumed a run-log invocation slot.
+        cancellationToken.ThrowIfCancellationRequested();
+
         var argv = ClaudeArguments.Build(options);
 
         var promptBytes = Encoding.UTF8.GetByteCount(options.Prompt);

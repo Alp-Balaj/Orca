@@ -48,10 +48,15 @@ public sealed class GateRunner(TimeSpan? timeout)
     /// policy — the full output is always in the run log.</summary>
     public const int TailLineCount = 60;
 
-    public GateCommandResult Run(string gate, IReadOnlyList<string> command, string workingDirectory, string outputPath)
+    public GateCommandResult Run(
+        string gate, IReadOnlyList<string> command, string workingDirectory, string outputPath,
+        CancellationToken cancellationToken = default)
     {
         if (command.Count == 0)
             throw new GateException($"gate '{gate}' has an empty command — check commands.{gate} in orca.json");
+
+        // BF-05: a pre-cancelled token must never spawn the gate at all.
+        cancellationToken.ThrowIfCancellationRequested();
 
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
 
@@ -106,17 +111,44 @@ public sealed class GateRunner(TimeSpan? timeout)
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
+            // BF-05: the wait polls so an interrupt actually reaches a running gate —
+            // Ctrl-C used to claim "process tree killed" while dotnet test ran to
+            // completion regardless. Cancellation kills the tree and throws; the note
+            // lands in the output log first so the evidence explains the short run.
             var timedOut = false;
-            var waitMs = timeout is { } ceiling ? (int)ceiling.TotalMilliseconds : -1;
-            if (!process.WaitForExit(waitMs))
+            var cancelled = false;
+            var deadline = timeout is { } ceiling ? stopwatch.Elapsed + ceiling : (TimeSpan?)null;
+            while (!process.WaitForExit(100))
             {
-                timedOut = true;
-                process.Kill(entireProcessTree: true);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    cancelled = true;
+                    process.Kill(entireProcessTree: true);
+                    break;
+                }
+
+                if (deadline is { } limit && stopwatch.Elapsed > limit)
+                {
+                    timedOut = true;
+                    process.Kill(entireProcessTree: true);
+                    break;
+                }
             }
 
             // Unconditional wait drains the async output readers even after a kill.
             process.WaitForExit();
             stopwatch.Stop();
+
+            if (cancelled)
+            {
+                lock (sink)
+                {
+                    output.WriteLine($"[orca] gate '{gate}' interrupted — process tree killed");
+                    output.Flush();
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+            }
 
             lock (sink)
             {

@@ -113,14 +113,20 @@ public sealed class CheckpointVerifier(
         // always run; recording an outcome for a command that never ran would be a lie
         // in a typed field.
         var gateRunner = new GateRunner(config.GateTimeout);
+        // BF-05: the token rides into each gate (a running dotnet test dies on Ctrl-C
+        // instead of the interrupt silently waiting it out) and is re-checked between
+        // steps so a cancelled pipeline never starts the next paid stage.
+        cancellationToken.ThrowIfCancellationRequested();
         observer?.OnRunEvent(new RunObservation.GateStarted("build", config.BuildCommand));
         var build = gateRunner.Run("build", config.BuildCommand, workspace.RepoRoot,
-            _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "build"));
+            _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "build"), cancellationToken);
         observer?.OnRunEvent(new RunObservation.GateFinished(build));
+        cancellationToken.ThrowIfCancellationRequested();
         observer?.OnRunEvent(new RunObservation.GateStarted("tests", config.TestCommand));
         var tests = gateRunner.Run("tests", config.TestCommand, workspace.RepoRoot,
-            _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "tests"));
+            _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "tests"), cancellationToken);
         observer?.OnRunEvent(new RunObservation.GateFinished(tests));
+        cancellationToken.ThrowIfCancellationRequested();
         baseline = baseline with { BuildGate = build, TestsGate = tests };
 
         // Captured now, right as the gates finish — the fingerprint of the exact tree

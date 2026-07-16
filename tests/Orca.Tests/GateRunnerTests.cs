@@ -129,4 +129,37 @@ public sealed class GateRunnerTests : IDisposable
 
         Assert.Contains("commands.build", ex.Message);
     }
+
+    [Fact]
+    public void A_pre_cancelled_token_never_spawns_the_gate()
+    {
+        // BF-05: Ctrl-C confirmed before the gate starts must not launch it at all.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var runner = new GateRunner(timeout: null);
+
+        Assert.Throws<OperationCanceledException>(() =>
+            runner.Run("build", EchoingScript(0), _dir, OutputPath("pre-cancelled"), cts.Token));
+
+        Assert.False(File.Exists(OutputPath("pre-cancelled")));
+    }
+
+    [Fact]
+    public async Task Cancellation_mid_run_kills_the_gate_and_leaves_the_note_in_the_log()
+    {
+        // BF-05: the interrupt used to wait out the whole suite while the modal claimed
+        // "process tree killed" — now the running gate actually dies.
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+        var runner = new GateRunner(timeout: null);
+        var outputPath = OutputPath("cancelled-mid-run");
+
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            Task.Run(() => runner.Run("tests", SleepingScript(), _dir, outputPath, cts.Token)));
+        elapsed.Stop();
+
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(20),
+            $"gate should die on cancellation, not run out its 30s sleep (took {elapsed.Elapsed})");
+        Assert.Contains("interrupted — process tree killed", File.ReadAllText(outputPath));
+    }
 }
