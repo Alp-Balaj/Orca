@@ -271,6 +271,7 @@ record from machine facts alone and spends nothing on the LLM roles.
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
                        [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
+    orca doctor [--repo <path>]
     orca status [--plan <id>] [--repo <path>]
     orca ui [--repo <path>]
     orca                        (no arguments, on an interactive terminal — opens the TUI)
@@ -282,6 +283,15 @@ commits with a structured message; Reject *offers* a hard reset (never automatic
 leaves the decision, and the next `checkpoint-run` resumes it instead of paying for a new
 invocation. `--dry-run` prints the branch, assembled prompt, and exact argv without
 mutating anything.
+
+`doctor` is the zero-cost preflight (SUG-10): environment (claude on PATH and its
+version vs the pin, git, the gate binaries resolving), config/vault integrity
+(backslash-free plansDir, sync-conflict artifacts, every plan parsed, status-vs-evidence
+sanity), and repo↔vault drift (records whose branches live on your other machine,
+approved-but-unmerged branches, run-state/vault attempt divergence — reported before it
+costs an invocation). Sectioned pass/warn/fail with one action line each, exit 0/1. The
+logged-in check is deliberately absent per spec §4; doctor says "auth state unknown
+until first invocation (by design)" instead of guessing.
 
 **Verification runs automatically after the Implementer** (spec §8, built in step 7),
 in a fixed order: deterministic gates first — `commands.build` then `commands.test` as

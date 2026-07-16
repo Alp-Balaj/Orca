@@ -17,6 +17,8 @@ app.Configure(config =>
         .WithDescription("Have the Planner write a draft plan into the vault from your goal brief (one scoped claude invocation, capped parse retries).");
     config.AddCommand<CheckpointRunCommand>("checkpoint-run")
         .WithDescription("Run one checkpoint (one scoped claude invocation), then stop for your approve/reject decision.");
+    config.AddCommand<DoctorCommand>("doctor")
+        .WithDescription("Zero-cost preflight: environment, config/vault integrity, and repo\u2194vault drift checks — pass/warn/fail, exit 0/1.");
     config.AddCommand<StatusCommand>("status")
         .WithDescription("Show the plan's checkpoints and the current run state.");
     config.AddCommand<UiCommand>("ui")
