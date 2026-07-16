@@ -60,9 +60,14 @@ internal sealed class TuiCheckpointGate(Action flushPending) : ICheckpointGate
     private static CheckpointDecision Decide(CheckpointDecisionContext context)
     {
         var body = new List<StyledLine>(RunDecisionText.Describe(context));
+        // Approve & complete is the default gate choice (SUG-02): enter selects it and c is
+        // the silent accelerator (same result, no extra footer hint). "Approve only" keeps
+        // the commit-without-status-flip path on a. Defer stays LAST so a close without a
+        // bound key falls through to the safe no-op (TuiModal returns the last choice).
         var choice = TuiModal.Ask($"checkpoint {context.Preview.Checkpoint.Id} — your call", body,
-            new TuiModal.Choice<GateChoice>(Key.A, "a approve", GateChoice.Approve),
-            new TuiModal.Choice<GateChoice>(Key.C, "c approve & complete", GateChoice.ApproveAndComplete),
+            new TuiModal.Choice<GateChoice>(Key.Enter, "enter / c approve & complete", GateChoice.ApproveAndComplete),
+            new TuiModal.Choice<GateChoice>(Key.C, "", GateChoice.ApproveAndComplete),
+            new TuiModal.Choice<GateChoice>(Key.A, "a approve only", GateChoice.Approve),
             new TuiModal.Choice<GateChoice>(Key.R, "r reject", GateChoice.Reject),
             new TuiModal.Choice<GateChoice>(Key.D, "d defer", GateChoice.Defer));
 
