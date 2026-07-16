@@ -4,6 +4,7 @@ using Orca.Core.Domain;
 using Orca.Core.Execution;
 using Orca.Core.Git;
 using Orca.Core.Planning;
+using Orca.Core.Vault;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -22,7 +23,7 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
         public string PlanId { get; init; } = null!;
 
         [CommandOption("--goal <TEXT>")]
-        [Description("The goal brief, inline. Exactly one of --goal / --goal-file is required.")]
+        [Description("The goal brief, inline. Omit both --goal and --goal-file to use the vault's <plan-id>.goal.md (written by `orca goal`).")]
         public string? Goal { get; init; }
 
         [CommandOption("--goal-file <PATH>")]
@@ -49,10 +50,14 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
         [Description("Target repo (any directory inside it). Defaults to the current directory.")]
         public string? Repo { get; init; }
 
+        [CommandOption("--force")]
+        [Description("Plan from the vault goal note even though it still has unanswered open questions (SUG-08).")]
+        public bool Force { get; init; }
+
         public override ValidationResult Validate()
         {
-            if (Goal is null == (GoalFile is null))
-                return ValidationResult.Error("exactly one of --goal or --goal-file is required");
+            if (Goal is not null && GoalFile is not null)
+                return ValidationResult.Error("--goal and --goal-file are mutually exclusive");
             if (Strategy is not (null or "single" or "multi"))
                 return ValidationResult.Error($"--strategy must be 'single' or 'multi', got '{Strategy}'");
             return ValidationResult.Success();
@@ -67,7 +72,40 @@ public sealed class PlanGenerateCommand : AsyncCommand<PlanGenerateCommand.Setti
         var workspace = GitWorkspace.Discover(settings.Repo ?? Directory.GetCurrentDirectory());
         var config = ConfigLoader.Load(workspace.RepoRoot);
 
-        var goal = settings.Goal ?? ReadGoalFile(settings.GoalFile!);
+        // SUG-08: with neither --goal nor --goal-file, the vault's refined goal note is
+        // the brief — and its open questions must be answered (or --force says the human
+        // accepts planning over them).
+        string goal;
+        if (settings.Goal is null && settings.GoalFile is null)
+        {
+            var layout = new VaultLayout(config.VaultRoot, config.PlansDir);
+            var goalPath = layout.GoalFile(settings.PlanId);
+            if (!File.Exists(goalPath))
+            {
+                AnsiConsole.MarkupLine(
+                    $"[red]no goal given and no goal note found[/] at {goalPath.EscapeMarkup()} — run " +
+                    "[bold]orca goal[/] first, or pass --goal/--goal-file.");
+                return 1;
+            }
+
+            var note = GoalNoteParser.Parse(File.ReadAllText(goalPath), goalPath);
+            var questions = note.UnansweredQuestions;
+            if (questions.Count > 0 && !settings.Force)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[red]the goal note still has {questions.Count} unanswered question(s)[/] — answer them in " +
+                    $"{goalPath.EscapeMarkup()} (replace each '- [ ]' item with your answer), or pass --force to plan over them:");
+                foreach (var question in questions)
+                    AnsiConsole.MarkupLine($"  · {question.EscapeMarkup()}");
+                return 1;
+            }
+
+            goal = note.Body;
+        }
+        else
+        {
+            goal = settings.Goal ?? ReadGoalFile(settings.GoalFile!);
+        }
         var request = new PlanningRequest
         {
             PlanId = settings.PlanId,

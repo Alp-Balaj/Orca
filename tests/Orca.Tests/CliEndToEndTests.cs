@@ -16,7 +16,9 @@ public sealed class CliEndToEndTests
     [Theory]
     [InlineData("--bogus")]
     [InlineData("nosuchcmd")]
-    [InlineData("plan-generate", "myplan")]
+    // Omitting both --goal and --goal-file is legal since SUG-08 (the vault goal note
+    // becomes the brief), so the invalid shape pinned here is the mutually exclusive pair.
+    [InlineData("plan-generate", "myplan", "--goal", "x", "--goal-file", "y")]
     [InlineData("plan-init", "x")]
     public void Bad_invocations_refuse_clean_with_the_message_on_stderr_and_empty_stdout(params string[] args)
     {

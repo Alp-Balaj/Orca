@@ -13,6 +13,8 @@ app.Configure(config =>
         .WithDescription("Scaffold a committed orca.json in this repo, then stop for you to review and commit it.");
     config.AddCommand<PlanInitCommand>("plan-init")
         .WithDescription("Create a plan directory with a schema-valid skeleton plan file in the vault.");
+    config.AddCommand<GoalCommand>("goal")
+        .WithDescription("Refine a raw goal into a reviewable brief (one cheap Interviewer invocation); answer its open questions, then plan-generate reads it.");
     config.AddCommand<PlanGenerateCommand>("plan-generate")
         .WithDescription("Have the Planner write a draft plan into the vault from your goal brief (one scoped claude invocation, capped parse retries).");
     config.AddCommand<CheckpointRunCommand>("checkpoint-run")

@@ -8,6 +8,9 @@ public enum RoleName
     Implementer,
     Reconciler,
     Verifier,
+    /// <summary>SUG-08: the goal-refinement interviewer behind <c>orca goal</c>.
+    /// Optional — a repo without <c>roles.interviewer</c> just can't run that command.</summary>
+    Interviewer,
 }
 
 /// <summary>The merged, resolved configuration one run works from: target-repo
@@ -75,6 +78,7 @@ public sealed record OrcaConfig
             RoleName.Implementer => RoleSections.Implementer,
             RoleName.Reconciler => RoleSections.Reconciler,
             RoleName.Verifier => RoleSections.Verifier,
+            RoleName.Interviewer => RoleSections.Interviewer,
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
         };
 
@@ -111,6 +115,7 @@ public sealed record OrcaConfig
         RoleName.Implementer => "implementer",
         RoleName.Reconciler => "reconciler",
         RoleName.Verifier => "verifier",
+        RoleName.Interviewer => "interviewer",
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
     };
 }

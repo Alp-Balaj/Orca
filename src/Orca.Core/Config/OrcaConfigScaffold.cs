@@ -99,6 +99,17 @@ public static class OrcaConfigScaffold
                     model = "sonnet",
                     maxBudgetUsd = 2,
                 },
+                // SUG-08: the goal-refinement interviewer behind `orca goal` — one cheap
+                // vault-scoped invocation that sharpens a raw goal into a reviewable
+                // brief before the Planner spends anything.
+                interviewer = new
+                {
+                    allowedTools = new[] { "Read", "Write", "Edit" },
+                    maxTurns = 15,
+                    timeoutSeconds = 600,
+                    model = "sonnet",
+                    maxBudgetUsd = 1,
+                },
             },
         };
 

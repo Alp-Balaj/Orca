@@ -207,6 +207,15 @@ commits to your branch on its own. Commit it (or pre-add `.orca/` yourself) and 
 
 ### The loop
 
+**0. (Optional) Refine the goal first.** `orca goal <plan-id> --goal "rough idea"` runs
+the Interviewer (SUG-08): one cheap vault-scoped invocation that writes
+`<plansDir>/<plan-id>/<plan-id>.goal.md` — outcome, constraints, non-goals, checkpoint
+guidance, and **open questions as `- [ ]` task items**. Answer them in Obsidian (replace
+each item with your answer), then run `plan-generate` with no `--goal`/`--goal-file`: it
+reads the note as the brief and refuses while unanswered questions remain (`--force`
+overrides). This is the "chat about the goal, get a prompt" step, automated with your
+best practices baked into the interview prompt.
+
 **1. Get a plan into the vault.** Either have the Planner write one:
 
     orca plan-generate <plan-id> --goal-file goal.md --repo <repo> [--dry-run]
@@ -267,6 +276,7 @@ record from machine facts alone and spends nothing on the LLM roles.
 
 ## Commands
 
+    orca goal <plan-id> (--goal <text> | --goal-file <path>) [--dry-run] [--repo <path>]
     orca plan-init <plan-id> --title <title> [--base-branch main] [--repo <path>]
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
                        [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]

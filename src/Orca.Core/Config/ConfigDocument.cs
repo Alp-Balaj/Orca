@@ -66,6 +66,10 @@ public sealed record RolesSection
     public RoleSection? Implementer { get; init; }
     public RoleSection? Reconciler { get; init; }
     public RoleSection? Verifier { get; init; }
+
+    /// <summary>SUG-08: optional — absent means `orca goal` refuses with a clear
+    /// message; every other command is unaffected.</summary>
+    public RoleSection? Interviewer { get; init; }
 }
 
 /// <summary>Per-role executor settings; maps 1:1 onto <c>ClaudeInvocationOptions</c>.
