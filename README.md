@@ -59,6 +59,11 @@ a human at every gate. Three parts:
 - **Shell** — a tree of the vault's plans → checkpoints (status-coloured), a detail pane for
   the selection, and a status bar (repo · branch + dirty flag · vault · the selected plan's
   accumulated cost). Arrow keys navigate and collapse/expand, `r` refreshes, `q` quits.
+  `a` on a plan approves it (draft → approved, confirmed, surgical frontmatter edit —
+  or back to draft on an approved plan); `m` on a checkpoint marks it complete, with the
+  confirm citing the completion evidence (approval commit / passing verification) or
+  warning loudly when there is none, and re-opens an already-complete checkpoint. No
+  more source-mode YAML edits in Obsidian — and no Properties-panel timestamp trap.
 - **Live pane** — press `x` to run the selected checkpoint: a preview modal authorizes the
   spend, then all four roles (Planner/Implementer/Reconciler/Verifier) stream live as the
   invocation runs, with scrollback (scroll up to pause tail-follow, End to resume) and an
@@ -68,8 +73,10 @@ a human at every gate. Three parts:
   CLI does.
 - **Plan-generate form** — press `g` to draft a new plan: fields for id, goal (text or file),
   base branch, title, and strategy (`multi` still refuses, per the CLI), then a gate-less
-  live Planner pane and the drafted-plan outcome. The draft still needs your approval in
-  Obsidian — the TUI never approves a plan.
+  live Planner pane and the drafted-plan outcome. The draft still needs your approval —
+  press `a` on it (or run `orca plan-approve`). The rule the spec protects is that the
+  *Planner* never self-approves; a human confirming the flip is the same deliberate act
+  as typing it in source mode, only the pen changed.
 
 The TUI is `Orca.Cli` only (Terminal.Gui 2.4.17, pinned above); `Orca.Core` and every
 subcommand's output are unchanged.
@@ -271,6 +278,8 @@ record from machine facts alone and spends nothing on the LLM roles.
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
                        [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
+    orca plan-approve [<plan-id>] [--revert] [--repo <path>]
+    orca checkpoint-complete <checkpoint-id> [--plan <id>] [--reopen] [--anyway] [--repo <path>]
     orca status [--plan <id>] [--repo <path>]
     orca ui [--repo <path>]
     orca                        (no arguments, on an interactive terminal — opens the TUI)
@@ -282,6 +291,13 @@ commits with a structured message; Reject *offers* a hard reset (never automatic
 leaves the decision, and the next `checkpoint-run` resumes it instead of paying for a new
 invocation. `--dry-run` prints the branch, assembled prompt, and exact argv without
 mutating anything.
+
+`plan-approve` and `checkpoint-complete` are the scripting parity of the TUI's `a`/`m`
+keys: the same surgical frontmatter editor (flip exactly the status + `updated` lines,
+validate through the real parser before writing, atomic write), one line of output
+naming the file changed. `checkpoint-complete` refuses without completion evidence
+unless you pass `--anyway`; `--reopen` flips a complete checkpoint back to pending
+(attempt numbering continues from the vault's records — nothing is ever renumbered).
 
 **Verification runs automatically after the Implementer** (spec §8, built in step 7),
 in a fixed order: deterministic gates first — `commands.build` then `commands.test` as
