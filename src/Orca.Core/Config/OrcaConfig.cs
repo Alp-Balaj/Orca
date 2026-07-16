@@ -53,6 +53,11 @@ public sealed record OrcaConfig
     /// machine-level ones.</summary>
     public required IReadOnlyList<string> DeniedTools { get; init; }
 
+    /// <summary>SUG-12 §1: judge-diff exclusion patterns. Null means the built-in
+    /// defaults (JudgeDiff.DefaultExcludes); an explicit empty list disables exclusion.
+    /// Not <c>required</c> so existing fixtures keep building.</summary>
+    public IReadOnlyList<string>? JudgeDiffExcludes { get; init; }
+
     /// <summary>Raw merged role blocks; consume through <see cref="GetRole"/>, which is
     /// the validated path.</summary>
     public required RolesSection RoleSections { get; init; }

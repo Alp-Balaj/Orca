@@ -26,6 +26,12 @@ public sealed record ConfigDocument
     public PlanningSection? Planning { get; init; }
     public IReadOnlyList<string>? DeniedTools { get; init; }
     public RolesSection? Roles { get; init; }
+
+    /// <summary>SUG-12 §1: file patterns whose diff content is excluded from the JUDGE
+    /// prompts (replaced by explicit markers). Absent means JudgeDiff.DefaultExcludes;
+    /// an explicit empty list disables exclusion. Repo value replaces the global one
+    /// wholesale — exclusion lists don't union sensibly.</summary>
+    public IReadOnlyList<string>? JudgeDiffExcludes { get; init; }
     public IReadOnlyDictionary<string, string>? Vaults { get; init; }
 
     /// <summary>"warn" or "refuse" for what a <c>claude_code_version</c> mismatch against
