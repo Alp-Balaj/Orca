@@ -22,6 +22,8 @@ public static class InvocationStopReasons
     {
         if (execution.Outcome == ExecutionOutcome.TimedOut)
             return InvocationStopReason.TimedOut;
+        if (execution.Outcome == ExecutionOutcome.Cancelled)
+            return InvocationStopReason.Interrupted;
         if (execution.AuthenticationFailed)
             return InvocationStopReason.AuthFailed;
         if (execution.Result?.Subtype == "error_max_budget_usd")
@@ -42,6 +44,7 @@ public static class InvocationStopReasons
         InvocationStopReason.RateLimited => "rate_limited",
         InvocationStopReason.BudgetExceeded => "budget_exceeded",
         InvocationStopReason.TimedOut => "timed_out",
+        InvocationStopReason.Interrupted => "interrupted",
         InvocationStopReason.Failed => "failed",
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "unknown stop reason"),
     };

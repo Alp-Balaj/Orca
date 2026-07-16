@@ -725,4 +725,83 @@ public sealed class CheckpointRunnerTests : IDisposable
             });
         }
     }
+
+    [Fact]
+    public async Task A_pre_spawn_executor_failure_does_not_burn_the_attempt()
+    {
+        // BF-12 §3: claude missing / bad workdir / prompt ceiling bill nothing — three
+        // such failures used to exhaust maxCheckpointAttempts and demand hand-editing
+        // .orca/state.
+        var runner = Runner(new FakeExecutor(_repo));
+        var preview = runner.Prepare(null, null);
+
+        var throwing = new CheckpointRunner(
+            Config(), GitWorkspace.Discover(_repo.Root), new PreSpawnFailingExecutor());
+        await Assert.ThrowsAsync<ExecutorException>(() => throwing.RunAsync(preview));
+
+        // No state survived the rollback: the next Prepare still plans attempt 1.
+        Assert.Null(new RunStateStore(_repo.Root).Read("recipe-tagging"));
+    }
+
+    [Fact]
+    public async Task The_pre_invocation_state_write_clears_the_previous_stop_reason()
+    {
+        // BF-12 §4: while an attempt is in flight (or after an interrupt), the previous
+        // attempt's stop reason must not render under the new attempt's number.
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, null));
+        Assert.Equal(InvocationStopReason.Succeeded, first.RunState.LastStopReason);
+        runner.Reject(discardChanges: true);
+
+        var observing = new CheckpointRunner(
+            Config(), GitWorkspace.Discover(_repo.Root), new StateSnoopingExecutor(_repo.Root));
+        await observing.RunAsync(observing.Prepare(null, null));
+
+        Assert.Null(StateSnoopingExecutor.ObservedMidRunStopReason);
+    }
+
+    private sealed class PreSpawnFailingExecutor : IClaudeExecutor
+    {
+        public Task<ClaudeExecutionResult> ExecuteAsync(
+            ClaudeInvocationOptions options, RunLogPaths logPaths,
+            IClaudeStreamObserver? observer = null, CancellationToken cancellationToken = default) =>
+            throw new ExecutorException("claude CLI not found on PATH — test double");
+    }
+
+    /// <summary>Reads the on-disk run state from INSIDE the invocation — exactly what
+    /// the TUI's idle pane would see mid-run — then completes like the fake.</summary>
+    private sealed class StateSnoopingExecutor(string repoRoot) : IClaudeExecutor
+    {
+        public static InvocationStopReason? ObservedMidRunStopReason;
+
+        public Task<ClaudeExecutionResult> ExecuteAsync(
+            ClaudeInvocationOptions options, RunLogPaths logPaths,
+            IClaudeStreamObserver? observer = null, CancellationToken cancellationToken = default)
+        {
+            ObservedMidRunStopReason = new RunStateStore(repoRoot).Read("recipe-tagging")!.LastStopReason;
+            return Task.FromResult(new ClaudeExecutionResult
+            {
+                Outcome = ExecutionOutcome.Completed,
+                ExitCode = 0,
+                SessionId = "snoop-session",
+                Result = new ClaudeResultSummary
+                {
+                    Subtype = "success",
+                    IsError = false,
+                    SessionId = "snoop-session",
+                    NumTurns = 1,
+                    DurationMs = 100,
+                    TotalCostUsd = 0.01m,
+                    Usage = new TokenUsage
+                    {
+                        InputTokens = 1,
+                        OutputTokens = 1,
+                        CacheCreationInputTokens = 0,
+                        CacheReadInputTokens = 0,
+                    },
+                },
+                Elapsed = TimeSpan.FromSeconds(0.1),
+            });
+        }
+    }
 }
