@@ -296,8 +296,11 @@ internal sealed class MainScreen : Window
     /// resuming it launches no invocation, so it skips straight to the decision, exactly as
     /// <c>checkpoint-run</c> already does on the CLI (<c>CheckpointRunCommand</c> has no
     /// confirm step either; only the pending-decision notice). Either way, the session then
-    /// runs to its decision in the full-screen <see cref="RunScreen"/>. On return the report
-    /// is rebuilt and the shell refreshes with the selection preserved.</summary>
+    /// runs to its decision in the full-screen <see cref="RunScreen"/>. After an Approve,
+    /// SUG-16 proposal A offers the plan's next pending checkpoint in the same session
+    /// (merge, prepare, run — never deciding); declining, or any non-Approved outcome,
+    /// falls out of the chain. On return the report is rebuilt and the shell refreshes
+    /// with the selection preserved.</summary>
     private void RunSelectedCheckpoint()
     {
         if (_tree.SelectedObject is not { Kind: TuiNodeKind.Checkpoint } node)
@@ -332,10 +335,54 @@ internal sealed class MainScreen : Window
                 return;
         }
 
-        RunScreen.Run(session, preview);
+        var result = RunScreen.Run(session, preview);
 
-        // Session over — the workflow stops (no auto-advance): rebuild and refresh, keeping
-        // the selection so the just-run checkpoint stays put with its updated evidence.
+        // SUG-16 proposal A, TUI lane: after an Approve, offer the plan's next pending
+        // checkpoint in this same session. The offer modal doubles as the
+        // authorize-the-spend moment for the chained attempt (the CLI's confirm plays the
+        // same role), so NeedsAuthorizePreview is deliberately not consulted here — one
+        // keypress per checkpoint, and every checkpoint still stops at its own gate.
+        while (result is { Outcome: CheckpointSessionOutcome.Approved })
+        {
+            var next = session.ChainCandidate(result.Preview);
+            if (next is null)
+                break;
+
+            var runNext = TuiModal.Ask("checkpoint approved — run the next one?",
+                ChainOfferText.Offer(next, result.Preview.Branch, result.Preview.Plan.BaseBranch),
+                new TuiModal.Choice<bool>(Key.Enter, "enter run next (spends quota)", true),
+                new TuiModal.Choice<bool>(Key.Esc, "esc back to shell", false));
+            if (!runNext)
+                break;
+
+            if (!session.MergeApprovedBranch(result.Preview))
+            {
+                TuiModal.Ask("cannot chain",
+                    ChainOfferText.MergeFailed(result.Preview.Branch, result.Preview.Plan.BaseBranch),
+                    new TuiModal.Choice<bool>(Key.Enter, "enter back", false),
+                    new TuiModal.Choice<bool>(Key.Esc, "esc back", false));
+                break;
+            }
+
+            try
+            {
+                preview = session.Prepare(result.Preview.Plan.PlanId, next.Id);
+            }
+            catch (Exception e)
+            {
+                TuiModal.Ask("cannot run this checkpoint",
+                    [StyledLine.Of(new("● ", TuiRole.Error), new(e.Message, TuiRole.Text))],
+                    new TuiModal.Choice<bool>(Key.Enter, "enter back", false),
+                    new TuiModal.Choice<bool>(Key.Esc, "esc back", false));
+                break;
+            }
+
+            result = RunScreen.Run(session, preview);
+        }
+
+        // Session over — the workflow stops (no auto-advance past a declined offer):
+        // rebuild and refresh, keeping the selection so the just-run checkpoint stays put
+        // with its updated evidence.
         Refresh();
     }
 
