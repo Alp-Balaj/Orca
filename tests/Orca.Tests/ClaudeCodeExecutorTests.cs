@@ -120,6 +120,7 @@ public class ClaudeCodeExecutorTests : IDisposable
         Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
         Assert.False(result.AuthenticationFailed);
         Assert.Equal("allowed", result.LastRateLimit?.Status);
+        Assert.Equal("claude-fable-5", result.ObservedModel);
 
         var log = File.ReadAllLines(paths.EventLog);
         Assert.Contains(log, l => l.Contains("\"process_exit\"") && l.Contains("\"stop_reason\":\"succeeded\""));

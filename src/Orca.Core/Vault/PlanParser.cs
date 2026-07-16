@@ -106,9 +106,14 @@ public static class PlanParser
             var description = cp.RequireString("description");
             var status = SchemaEnums.ParseCheckpointStatus(cp.RequireString("status"), filePath);
             var criteria = cp.RequireStringList("acceptance_criteria");
+            var model = cp.OptionalString("model");
+            var maxBudgetUsd = cp.OptionalDecimal("max_budget_usd");
+            if (maxBudgetUsd is <= 0)
+                throw new VaultSchemaException(filePath,
+                    $"checkpoint '{id}': max_budget_usd, when set, must be positive, got {maxBudgetUsd}");
             cp.ThrowIfUnknownKeys();
 
-            checkpoints.Add(new Checkpoint(id, description, status, criteria));
+            checkpoints.Add(new Checkpoint(id, description, status, criteria, model, maxBudgetUsd));
         }
 
         return checkpoints;

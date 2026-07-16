@@ -96,6 +96,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
         }, CancellationToken.None);
 
         string? sessionId = null;
+        string? observedModel = null;
         ClaudeResultSummary? result = null;
         var authenticationFailed = false;
         RateLimitInfo? lastRateLimit = null;
@@ -126,7 +127,10 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
                 }
 
                 if (streamEvent.IsInit)
+                {
                     sessionId ??= streamEvent.SessionId;
+                    observedModel ??= streamEvent.Model;
+                }
                 if (streamEvent.Result is not null)
                     result = streamEvent.Result;
                 if (streamEvent.Error == "authentication_failed")
@@ -209,6 +213,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             Result = result,
             AuthenticationFailed = authenticationFailed,
             LastRateLimit = lastRateLimit,
+            ObservedModel = observedModel,
             Elapsed = stopwatch.Elapsed,
         };
 
@@ -282,6 +287,12 @@ public sealed record ClaudeExecutionResult
     /// <summary>The last <c>rate_limit_event</c> observed, if any — healthy runs emit
     /// these too (<c>status: "allowed"</c>), so presence alone is not a failure.</summary>
     public RateLimitInfo? LastRateLimit { get; init; }
+
+    /// <summary>The model the init event reported this invocation actually resolved to —
+    /// distinct from <c>ClaudeInvocationOptions.Model</c> (what was requested), so a
+    /// behavior change stays attributable to the actual model even if a role's
+    /// configured tier and the CLI's resolution ever disagree (SUG-05).</summary>
+    public string? ObservedModel { get; init; }
 
     /// <summary>Derived, never stored separately, so it can't disagree with the
     /// evidence.</summary>

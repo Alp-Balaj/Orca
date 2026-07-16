@@ -213,8 +213,11 @@ public sealed class CheckpointRunner(
             AllowedTools = role.AllowedTools,
             MaxTurns = role.MaxTurns,
             Timeout = role.Timeout,
-            Model = role.Model,
-            MaxBudgetUsd = role.MaxBudgetUsd,
+            // SUG-05: a checkpoint's own model/max_budget_usd (the Planner's escalate-a-
+            // hard-checkpoint / downgrade-a-trivial-one lever) wins over the role default;
+            // absent on the checkpoint, roles.implementer's own setting is unchanged.
+            Model = checkpoint.Model ?? role.Model,
+            MaxBudgetUsd = checkpoint.MaxBudgetUsd ?? role.MaxBudgetUsd,
             SettingsFilePath = settingsJson is null
                 ? null
                 : _logLayout.SettingsFile(plan.PlanId, checkpoint.Id, attempt),

@@ -15,6 +15,12 @@ public sealed record ClaudeStreamEvent
     public string? Subtype { get; init; }
     public string? SessionId { get; init; }
 
+    /// <summary>Top-level <c>model</c> on a <c>system</c>/<c>init</c> event — the model
+    /// the CLI actually resolved to for this invocation, not merely what
+    /// <c>ClaudeInvocationOptions.Model</c> requested (SUG-05: attributable actuals).
+    /// Read leniently like every other init field here.</summary>
+    public string? Model { get; init; }
+
     /// <summary>Non-null iff <see cref="Type"/> is <c>result</c>.</summary>
     public ClaudeResultSummary? Result { get; init; }
 
@@ -52,6 +58,7 @@ public sealed record ClaudeStreamEvent
             Result = type == "result" ? ClaudeResultSummary.Parse(root, line) : null,
             Error = StreamJson.OptionalString(root, "error"),
             RateLimit = type == "rate_limit_event" ? RateLimitInfo.Parse(root) : null,
+            Model = StreamJson.OptionalString(root, "model"),
             RawLine = line,
         };
     }

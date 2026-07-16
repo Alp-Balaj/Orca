@@ -181,15 +181,15 @@ Minimal working shape (this is the config the e2e run used, trimmed):
       "maxCheckpointAttempts": 3,
       "roles": {
         "planner":     { "allowedTools": ["Read", "Write", "Edit"],
-                         "maxTurns": 30, "timeoutSeconds": 900,  "maxBudgetUsd": 2 },
+                         "maxTurns": 30, "timeoutSeconds": 900,  "model": "opus",   "maxBudgetUsd": 2 },
         "implementer": { "allowedTools": ["Read", "Glob", "Grep", "Write", "Edit",
                                           "Bash(dotnet build*)", "Bash(dotnet test*)",
                                           "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)"],
-                         "maxTurns": 60, "timeoutSeconds": 1800, "maxBudgetUsd": 5 },
+                         "maxTurns": 60, "timeoutSeconds": 1800, "model": "sonnet", "maxBudgetUsd": 5 },
         "reconciler":  { "allowedTools": ["Read", "Write", "Edit"],
-                         "maxTurns": 15, "timeoutSeconds": 600,  "maxBudgetUsd": 2 },
+                         "maxTurns": 15, "timeoutSeconds": 600,  "model": "haiku",  "maxBudgetUsd": 2 },
         "verifier":    { "allowedTools": ["Read", "Write", "Edit"],
-                         "maxTurns": 15, "timeoutSeconds": 600,  "maxBudgetUsd": 2 }
+                         "maxTurns": 15, "timeoutSeconds": 600,  "model": "sonnet", "maxBudgetUsd": 2 }
       }
     }
 

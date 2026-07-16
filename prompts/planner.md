@@ -42,6 +42,8 @@ checkpoints:
     acceptance_criteria:
       - <a checkable statement>
       - <another checkable statement>
+    model: opus            # optional — omit unless this checkpoint needs it (see below)
+    max_budget_usd: 8       # optional — omit unless this checkpoint needs it (see below)
 ---
 ```
 
@@ -58,14 +60,32 @@ Rules the parser enforces — treat every one as hard:
   offset; never a bare local time.
 - `planning` contains exactly one key: `strategy: single_candidate`. The keys
   `candidates`, `selected`, and `rationale` must be absent.
-- `checkpoints` is a non-empty ordered list. Each entry has exactly the four keys shown:
+- `checkpoints` is a non-empty ordered list. Each entry has the four required keys shown,
+  plus the two optional ones below when you use them:
   - `id` matches `^\d{2}-[a-z0-9-]+$`; prefixes are strictly increasing starting at `01`
     (`01-…`, `02-…`, …); ids are unique.
   - `description` is one non-empty line.
   - `status` is exactly `pending` for every checkpoint.
   - `acceptance_criteria` is a non-empty list of strings — never a paragraph.
+  - `model` (optional) overrides `roles.implementer.model` for this checkpoint only — a
+    non-empty string naming a model tier (e.g. `opus`, `sonnet`, `haiku`).
+  - `max_budget_usd` (optional) overrides `roles.implementer.maxBudgetUsd` for this
+    checkpoint only — a positive number.
 - No other keys anywhere in the frontmatter — no `tags`, no `aliases`, nothing beyond the
   fields shown above.
+
+## Per-checkpoint model/budget overrides — use sparingly
+
+Most checkpoints should carry neither `model` nor `max_budget_usd` — the repo's own
+`roles.implementer` tier already fits ordinary work, and omitting both is the normal case.
+Set them only when a specific checkpoint's difficulty clearly diverges from the rest of
+the plan: `model: opus` (and usually a higher `max_budget_usd`) for a checkpoint whose
+core risk is judgment — an ambiguous design decision, a tricky concurrency or migration
+change — not merely "more files than usual"; a lower-effort `max_budget_usd` for a
+checkpoint you expect to be genuinely trivial (e.g. a one-line config change, a docs-only
+edit). State the reason in the checkpoint's own context or the plan body — the human
+reviewing the draft should see why this one checkpoint is tiered differently, not have to
+guess.
 
 ## Plan quality discipline
 
