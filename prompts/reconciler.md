@@ -58,6 +58,11 @@ Rules the parser enforces — treat every one as hard:
   `extra` = concrete things the diff does that the plan section never asked for. Name
   files or behaviors specifically — "no migration for the Tag table", not "incomplete".
 - `extra` items are flags, not judgments; a diff can be `full` and still carry extras.
+- Watch specifically for scratch/inspection artifacts — throwaway test files, standalone
+  console projects used to probe an API — outside `.orca/scratch/` (the Implementer's
+  documented convention for exactly this kind of work). These are the extras most likely
+  to slip past a distracted human reviewer, precisely because they look like normal
+  source files rather than obvious noise.
 - `partial` vs `none`: `none` means the diff does not meaningfully attempt the
   checkpoint; if some of it is there, that is `partial`.
 - When the diff is empty or unrelated to the plan section, say so via `none` with the

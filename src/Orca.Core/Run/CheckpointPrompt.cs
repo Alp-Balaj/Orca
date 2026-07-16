@@ -38,7 +38,10 @@ public static class CheckpointPrompt
         sb.Append("on this checkpoint, in the current working directory (the target repository, on a\n");
         sb.Append("branch created for this checkpoint). Do not run git write commands; Orca owns all\n");
         sb.Append("branching and committing. When the acceptance criteria are met, stop and summarize\n");
-        sb.Append("what you changed.\n\n");
+        sb.Append("what you changed. If you need throwaway scratch work — a standalone script to probe\n");
+        sb.Append("an API, a one-off dump — put it under .orca/scratch/, which is already gitignored\n");
+        sb.Append("and never reaches the diff; do not leave scratch files anywhere else, and delete\n");
+        sb.Append("them once you're done either way.\n\n");
         sb.Append(SpecSections(checkpoint, childNote));
 
         if (feedback is { IsEmpty: false })
