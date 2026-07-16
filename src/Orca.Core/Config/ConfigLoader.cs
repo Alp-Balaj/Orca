@@ -113,13 +113,18 @@ public static class ConfigLoader
 
     private static OrcaConfig Resolve(ConfigDocument merged, string repoPath, string globalPath)
     {
+        // Every check below runs on the merged/effective value — repo and global are
+        // layered field-by-field (see Merge), so a value that fails here could have come
+        // from either file. Naming both, the way OrcaConfig.GetRole already does, beats
+        // guessing which one to blame (BF-16): "{repoPath}: ..." previously blamed the
+        // repo file even when the value came only from the global config.
         var vaultName = merged.Vault?.Name;
         if (string.IsNullOrWhiteSpace(vaultName))
-            throw new ConfigException($"{repoPath}: vault.name is required");
+            throw new ConfigException($"vault.name is required after merging {repoPath} over {globalPath}");
 
         var plansDir = merged.Vault?.PlansDir;
         if (string.IsNullOrWhiteSpace(plansDir))
-            throw new ConfigException($"{repoPath}: vault.plansDir is required");
+            throw new ConfigException($"vault.plansDir is required after merging {repoPath} over {globalPath}");
 
         if (merged.Vaults is null || !merged.Vaults.TryGetValue(vaultName, out var vaultRoot))
             throw new ConfigException(
@@ -128,25 +133,30 @@ public static class ConfigLoader
             throw new ConfigException(
                 $"{globalPath}: vaults['{vaultName}'] must be an absolute path, got '{vaultRoot}'");
 
-        var build = RequireCommand(merged.Commands?.Build, "commands.build", repoPath);
-        var test = RequireCommand(merged.Commands?.Test, "commands.test", repoPath);
+        var build = RequireCommand(merged.Commands?.Build, "commands.build", repoPath, globalPath);
+        var test = RequireCommand(merged.Commands?.Test, "commands.test", repoPath, globalPath);
 
         if (merged.GateTimeoutSeconds is < 1)
-            throw new ConfigException($"{repoPath}: gateTimeoutSeconds must be >= 1, got {merged.GateTimeoutSeconds}");
+            throw new ConfigException(
+                $"gateTimeoutSeconds must be >= 1, got {merged.GateTimeoutSeconds}, after merging {repoPath} over {globalPath}");
         if (merged.MaxParseRetries is < 0)
-            throw new ConfigException($"{repoPath}: maxParseRetries must be >= 0, got {merged.MaxParseRetries}");
+            throw new ConfigException(
+                $"maxParseRetries must be >= 0, got {merged.MaxParseRetries}, after merging {repoPath} over {globalPath}");
         if (merged.MaxCheckpointAttempts is < 1)
-            throw new ConfigException($"{repoPath}: maxCheckpointAttempts must be >= 1, got {merged.MaxCheckpointAttempts}");
+            throw new ConfigException(
+                $"maxCheckpointAttempts must be >= 1, got {merged.MaxCheckpointAttempts}, after merging {repoPath} over {globalPath}");
         if (merged.Planning?.Candidates is { } candidates and < 2)
-            throw new ConfigException($"{repoPath}: planning.candidates must be >= 2, got {candidates}");
+            throw new ConfigException(
+                $"planning.candidates must be >= 2, got {candidates}, after merging {repoPath} over {globalPath}");
 
         var denied = merged.DeniedTools ?? [];
         if (denied.Any(string.IsNullOrWhiteSpace))
-            throw new ConfigException($"{repoPath}: deniedTools patterns must be non-empty; got a blank entry");
+            throw new ConfigException(
+                $"deniedTools patterns must be non-empty; got a blank entry, after merging {repoPath} over {globalPath}");
 
         var roles = merged.Roles ?? new RolesSection();
         foreach (var (key, section) in EnumerateRoles(roles))
-            ValidateRoleSection(key, section, repoPath);
+            ValidateRoleSection(key, section, repoPath, globalPath);
 
         return new OrcaConfig
         {
@@ -169,12 +179,14 @@ public static class ConfigLoader
     }
 
     private static IReadOnlyList<string> RequireCommand(
-        IReadOnlyList<string>? argv, string field, string repoPath)
+        IReadOnlyList<string>? argv, string field, string repoPath, string globalPath)
     {
         if (argv is null || argv.Count == 0)
-            throw new ConfigException($"{repoPath}: {field} is required and must be a non-empty argv array");
+            throw new ConfigException(
+                $"{field} is required and must be a non-empty argv array after merging {repoPath} over {globalPath}");
         if (argv.Any(string.IsNullOrWhiteSpace))
-            throw new ConfigException($"{repoPath}: {field} must not contain blank argv elements");
+            throw new ConfigException(
+                $"{field} must not contain blank argv elements after merging {repoPath} over {globalPath}");
         return argv;
     }
 
@@ -188,19 +200,24 @@ public static class ConfigLoader
 
     /// <summary>Shape validation for whatever fields a role block does declare; block
     /// completeness is only enforced when the role is invoked (<see cref="OrcaConfig.GetRole"/>).</summary>
-    private static void ValidateRoleSection(string key, RoleSection? section, string repoPath)
+    private static void ValidateRoleSection(string key, RoleSection? section, string repoPath, string globalPath)
     {
         if (section is null)
             return;
         if (section.AllowedTools is { } tools && tools.Any(string.IsNullOrWhiteSpace))
-            throw new ConfigException($"{repoPath}: roles.{key}.allowedTools must not contain blank patterns");
+            throw new ConfigException(
+                $"roles.{key}.allowedTools must not contain blank patterns, after merging {repoPath} over {globalPath}");
         if (section.MaxTurns is < 1)
-            throw new ConfigException($"{repoPath}: roles.{key}.maxTurns must be >= 1, got {section.MaxTurns}");
+            throw new ConfigException(
+                $"roles.{key}.maxTurns must be >= 1, got {section.MaxTurns}, after merging {repoPath} over {globalPath}");
         if (section.TimeoutSeconds is < 1)
-            throw new ConfigException($"{repoPath}: roles.{key}.timeoutSeconds must be >= 1, got {section.TimeoutSeconds}");
+            throw new ConfigException(
+                $"roles.{key}.timeoutSeconds must be >= 1, got {section.TimeoutSeconds}, after merging {repoPath} over {globalPath}");
         if (section.Model is not null && string.IsNullOrWhiteSpace(section.Model))
-            throw new ConfigException($"{repoPath}: roles.{key}.model, when set, must be non-empty");
+            throw new ConfigException(
+                $"roles.{key}.model, when set, must be non-empty, after merging {repoPath} over {globalPath}");
         if (section.MaxBudgetUsd is <= 0)
-            throw new ConfigException($"{repoPath}: roles.{key}.maxBudgetUsd must be positive, got {section.MaxBudgetUsd}");
+            throw new ConfigException(
+                $"roles.{key}.maxBudgetUsd must be positive, got {section.MaxBudgetUsd}, after merging {repoPath} over {globalPath}");
     }
 }

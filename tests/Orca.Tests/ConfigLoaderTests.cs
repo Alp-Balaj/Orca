@@ -290,6 +290,63 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
+    public void A_value_invalid_only_in_the_global_config_names_both_files_not_just_the_repo()
+    {
+        // BF-16: the repo file omits maxCheckpointAttempts entirely — an offending value
+        // that's global-only must not produce an error that reads as if it lives in the
+        // repo's orca.json, the way "{repoPath}: maxCheckpointAttempts must be >= 1..."
+        // used to.
+        var global = WriteGlobalConfig($$"""
+            {
+              "schemaVersion": 1,
+              "vaults": { "brian-the-brain": {{System.Text.Json.JsonSerializer.Serialize(Path.Combine(_root, "vault"))}} },
+              "maxCheckpointAttempts": 0
+            }
+            """);
+        var repoPath = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] }
+            }
+            """);
+
+        var e = Assert.Throws<ConfigException>(() => ConfigLoader.Load(repoPath, global));
+
+        Assert.Contains("maxCheckpointAttempts must be >= 1, got 0", e.Message);
+        Assert.Contains(Path.Combine(repoPath, "orca.json"), e.Message);
+        Assert.Contains(global, e.Message);
+    }
+
+    [Fact]
+    public void A_role_field_invalid_only_in_the_global_config_names_both_files()
+    {
+        // Same class of bug (BF-16), through ValidateRoleSection: the repo declares no
+        // "verifier" block at all, so the whole section — including the bad maxTurns —
+        // comes from global.
+        var global = WriteGlobalConfig($$"""
+            {
+              "schemaVersion": 1,
+              "vaults": { "brian-the-brain": {{System.Text.Json.JsonSerializer.Serialize(Path.Combine(_root, "vault"))}} },
+              "roles": { "verifier": { "maxTurns": 0 } }
+            }
+            """);
+        var repoPath = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] }
+            }
+            """);
+
+        var e = Assert.Throws<ConfigException>(() => ConfigLoader.Load(repoPath, global));
+
+        Assert.Contains("roles.verifier.maxTurns must be >= 1, got 0", e.Message);
+        Assert.Contains(Path.Combine(repoPath, "orca.json"), e.Message);
+        Assert.Contains(global, e.Message);
+    }
+
+    [Fact]
     public void Gate_timeout_merges_repo_over_global_and_maps_to_a_timespan()
     {
         var global = WriteGlobalConfig($$"""
