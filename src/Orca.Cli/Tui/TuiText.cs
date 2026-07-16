@@ -15,11 +15,24 @@ internal static class TuiText
 {
     /// <summary>Right-top pane for the current selection: plan facts for a plan node, or a
     /// checkpoint's description + acceptance criteria + latest evidence.</summary>
-    public static IReadOnlyList<StyledLine> Detail(TuiTreeNode node) => node.Kind switch
+    public static IReadOnlyList<StyledLine> Detail(TuiTreeNode node) => node switch
     {
-        TuiNodeKind.Checkpoint => CheckpointDetail(node),
+        { Plan.LoadError: { } reason } => UnparseablePlanDetail(node.Plan.Plan.PlanId, reason),
+        { Kind: TuiNodeKind.Checkpoint } => CheckpointDetail(node),
         _ => PlanDetail(node.Plan.Plan),
     };
+
+    /// <summary>Detail pane for a plan file the parser refused (BF-13): the exact reason
+    /// and the honest instruction — fix the file; nothing can run against it.</summary>
+    private static IReadOnlyList<StyledLine> UnparseablePlanDetail(string planId, string reason) =>
+    [
+        StyledLine.Plain(planId, TuiRole.Heading),
+        StyledLine.Of(new("✗ ", TuiRole.Error), new("plan file does not parse", TuiRole.Error)),
+        StyledLine.Empty,
+        StyledLine.Plain(reason, TuiRole.Text),
+        StyledLine.Empty,
+        StyledLine.Plain("Fix the file (Obsidian sync artifact? hand edit?), then press r — nothing can run against it as-is.", TuiRole.Dim),
+    ];
 
     /// <summary>Detail pane when the vault has no plans — the first-run screen. Friendly,
     /// and points at the one command that changes the situation.</summary>

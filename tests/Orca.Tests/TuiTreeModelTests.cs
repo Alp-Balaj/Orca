@@ -132,4 +132,23 @@ public sealed class TuiTreeModelTests
     [InlineData(CheckpointStatus.Pending, true, "⏺")]
     public void Glyph_marks_current_first_then_status(CheckpointStatus status, bool isCurrent, string expected)
         => Assert.Equal(expected, TuiTreeModel.CheckpointGlyph(status, isCurrent));
+
+    [Fact]
+    public void An_unparseable_plan_renders_as_a_red_error_node_with_reason_in_the_detail()
+    {
+        // BF-13 / SUG-14 §1: one malformed plan is an error node, never a blocked tree.
+        var entry = Orca.Core.Run.PlanStatusEntry.Unparseable("broken-plan", "invalid YAML in frontmatter: x");
+
+        var roots = TuiTreeModel.Build(TuiTestData.MakeReport(true, entry));
+
+        var node = Assert.Single(roots);
+        Assert.Equal("✗ broken-plan (unparseable)", node.Label);
+        Assert.Equal(TuiNodeStatus.Failed, node.Status);
+        Assert.Empty(node.Children);
+
+        var detail = string.Join("\n", TuiText.Detail(node).Select(l => l.PlainText()));
+        Assert.Contains("plan file does not parse", detail);
+        Assert.Contains("invalid YAML in frontmatter: x", detail);
+        Assert.Contains("press r", detail);
+    }
 }
