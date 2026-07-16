@@ -1,12 +1,6 @@
 using Orca.Cli;
 using Orca.Cli.Commands;
 using Orca.Cli.Tui;
-using Orca.Core.Config;
-using Orca.Core.Execution;
-using Orca.Core.Git;
-using Orca.Core.Planning;
-using Orca.Core.Run;
-using Orca.Core.Vault;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -41,19 +35,11 @@ try
 
     return await app.RunAsync(args);
 }
-catch (MissingRepoConfigException e)
-{
-    // The one refusal with a concrete next step: no orca.json here. Point the way
-    // forward. Core stays free of CLI vocabulary — the command name lives only here.
-    AnsiConsole.MarkupLine(
-        $"[red]error:[/] {e.Message.EscapeMarkup()} — run 'orca init' to scaffold one.");
-    return 1;
-}
-catch (Exception e) when (e is ConfigException or VaultException or GitException
-    or ExecutorException or CheckpointRunException or PlanningException or ArgumentException)
+catch (Exception e) when (ExitDecision.Describe(e) is { } message)
 {
     // Fail loud, but with the reason and no stack noise — these are refusals and
-    // misconfigurations, not bugs. Anything else escapes and crashes visibly.
-    AnsiConsole.MarkupLine($"[red]error:[/] {e.Message.EscapeMarkup()}");
+    // misconfigurations, not bugs. ExitDecision is the pure decision of what counts as
+    // one of those; anything else escapes this filter and crashes visibly.
+    AnsiConsole.MarkupLine($"[red]error:[/] {message.EscapeMarkup()}");
     return 1;
 }

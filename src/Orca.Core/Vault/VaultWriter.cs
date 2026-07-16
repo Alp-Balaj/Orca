@@ -44,7 +44,7 @@ public sealed class VaultWriter(VaultLayout layout)
             File.WriteAllText(tempPath, text);
             File.Move(tempPath, path, overwrite: false);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             throw new VaultException($"failed to write {kind}: {path}", ex);
         }
