@@ -36,6 +36,25 @@ public sealed class GateRunnerTests : IDisposable
             ? ["ping", "-n", "30", "127.0.0.1"]
             : ["sleep", "30"];
 
+    /// <summary>A script that prints <paramref name="count"/> numbered lines
+    /// (<c>line-1</c> .. <c>line-N</c>) and exits 0.</summary>
+    private string[] NumberedLinesScript(int count)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var cmd = Path.Combine(_dir, $"lines-{count}.cmd");
+            var body = string.Concat(Enumerable.Range(1, count).Select(i => $"echo line-{i}\r\n"));
+            File.WriteAllText(cmd, $"@echo off\r\n{body}exit /b 0\r\n");
+            return [cmd];
+        }
+
+        var sh = Path.Combine(_dir, $"lines-{count}.sh");
+        var shBody = string.Concat(Enumerable.Range(1, count).Select(i => $"echo line-{i}\n"));
+        File.WriteAllText(sh, $"#!/bin/sh\n{shBody}exit 0\n");
+        File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return [sh];
+    }
+
     [Fact]
     public void Exit_zero_is_a_pass_with_output_captured()
     {
@@ -82,6 +101,24 @@ public sealed class GateRunnerTests : IDisposable
         Assert.Equal(GateOutcome.Fail, result.Outcome);
         Assert.Contains("process tree killed", File.ReadAllText(result.OutputPath));
         Assert.Contains("process tree killed", result.OutputTail);
+    }
+
+    [Fact]
+    public void The_tail_keeps_exactly_the_last_60_lines_verbatim()
+    {
+        var result = new GateRunner(timeout: null)
+            .Run("tests", NumberedLinesScript(75), _dir, OutputPath("many-lines"));
+
+        var tailLines = result.OutputTail.Split('\n');
+        Assert.Equal(GateRunner.TailLineCount, tailLines.Length);
+        Assert.Equal("line-16", tailLines[0]); // lines 1-15 pushed out by the 60-line cap
+        Assert.Equal("line-75", tailLines[^1]);
+        Assert.DoesNotContain("line-15", result.OutputTail.Split('\n'));
+
+        // The full output on disk is unaffected by the tail cap — only the excerpt is capped.
+        var fullOutput = File.ReadAllText(result.OutputPath);
+        Assert.Contains("line-1", fullOutput);
+        Assert.Contains("line-75", fullOutput);
     }
 
     [Fact]

@@ -96,6 +96,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
         }, CancellationToken.None);
 
         string? sessionId = null;
+        string? claudeCodeVersion = null;
         ClaudeResultSummary? result = null;
         var authenticationFailed = false;
         RateLimitInfo? lastRateLimit = null;
@@ -126,7 +127,10 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
                 }
 
                 if (streamEvent.IsInit)
+                {
                     sessionId ??= streamEvent.SessionId;
+                    claudeCodeVersion ??= streamEvent.ClaudeCodeVersion;
+                }
                 if (streamEvent.Result is not null)
                     result = streamEvent.Result;
                 if (streamEvent.Error == "authentication_failed")
@@ -209,6 +213,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             Result = result,
             AuthenticationFailed = authenticationFailed,
             LastRateLimit = lastRateLimit,
+            ClaudeCodeVersion = claudeCodeVersion,
             Elapsed = stopwatch.Elapsed,
         };
 
@@ -282,6 +287,13 @@ public sealed record ClaudeExecutionResult
     /// <summary>The last <c>rate_limit_event</c> observed, if any — healthy runs emit
     /// these too (<c>status: "allowed"</c>), so presence alone is not a failure.</summary>
     public RateLimitInfo? LastRateLimit { get; init; }
+
+    /// <summary>The <c>claude_code_version</c> the init event reported; null if no init
+    /// event arrived or it omitted the field. Compare against
+    /// <see cref="ClaudeVersionCheck.PinnedVersion"/> — Orca's safe-mode/stream-json
+    /// contract is only probed against the pin, and CLI updates land silently otherwise
+    /// (SUG-15).</summary>
+    public string? ClaudeCodeVersion { get; init; }
 
     /// <summary>Derived, never stored separately, so it can't disagree with the
     /// evidence.</summary>
