@@ -323,7 +323,7 @@ internal sealed class MainScreen : Window
             return;
         }
 
-        if (!preview.PendingDecision)
+        if (NeedsAuthorizePreview(preview.PendingDecision))
         {
             var authorized = TuiModal.Ask("preview — authorize the run", RunPreviewText.Describe(preview),
                 new TuiModal.Choice<bool>(Key.Enter, "enter run (spends quota)", true),
@@ -338,6 +338,13 @@ internal sealed class MainScreen : Window
         // the selection so the just-run checkpoint stays put with its updated evidence.
         Refresh();
     }
+
+    /// <summary>False exactly when resuming a checkpoint that's already awaiting a
+    /// decision — nothing new would be launched, so there's no spend to authorize.
+    /// Pulled out of <see cref="RunSelectedCheckpoint"/> (SUG-15) so this decision has a
+    /// test independent of Terminal.Gui/<see cref="TuiModal"/> and of
+    /// <see cref="CheckpointRunPreview"/>'s much larger shape.</summary>
+    internal static bool NeedsAuthorizePreview(bool pendingDecision) => !pendingDecision;
 
     /// <summary>Per-node colour in the tree, from the same status categories the glyphs
     /// encode: green done, red failed, yellow active, dim pending (plans stay in the

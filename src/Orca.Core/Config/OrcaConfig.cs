@@ -1,3 +1,5 @@
+using Orca.Core.Execution;
+
 namespace Orca.Core.Config;
 
 public enum RoleName
@@ -54,6 +56,13 @@ public sealed record OrcaConfig
     /// <summary>Raw merged role blocks; consume through <see cref="GetRole"/>, which is
     /// the validated path.</summary>
     public required RolesSection RoleSections { get; init; }
+
+    /// <summary>What a <c>claude_code_version</c> mismatch does (SUG-15). Not
+    /// <c>required</c> and defaults to <see cref="ClaudeVersionPolicy.Warn"/> so every
+    /// <c>OrcaConfig</c> built directly (every test fixture that doesn't go through
+    /// <see cref="ConfigLoader"/>) gets the same non-breaking default a real, opinion-free
+    /// config file gets.</summary>
+    public ClaudeVersionPolicy ClaudeVersionPolicy { get; init; } = ClaudeVersionPolicy.Warn;
 
     /// <summary>The validated executor settings for one role. Throws
     /// <see cref="ConfigException"/> naming every missing field and both files consulted,

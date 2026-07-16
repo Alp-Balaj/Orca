@@ -1,3 +1,5 @@
+using Orca.Core.Execution;
+
 namespace Orca.Core.Config;
 
 /// <summary>Loads the committed target-repo <c>orca.json</c> over the machine's global
@@ -61,6 +63,7 @@ public static class ConfigLoader
         DeniedTools = UnionDeniedTools(global.DeniedTools, repo.DeniedTools),
         Roles = MergeRoles(global.Roles, repo.Roles),
         Vaults = global.Vaults,
+        ClaudeVersionPolicy = repo.ClaudeVersionPolicy ?? global.ClaudeVersionPolicy,
     };
 
     private static VaultSection MergeVault(VaultSection? global, VaultSection? repo) => new()
@@ -158,6 +161,8 @@ public static class ConfigLoader
         foreach (var (key, section) in EnumerateRoles(roles))
             ValidateRoleSection(key, section, repoPath, globalPath);
 
+        var claudeVersionPolicy = ParseClaudeVersionPolicy(merged.ClaudeVersionPolicy, repoPath, globalPath);
+
         return new OrcaConfig
         {
             RepoConfigPath = repoPath,
@@ -175,8 +180,21 @@ public static class ConfigLoader
             PlanningCandidates = merged.Planning?.Candidates,
             DeniedTools = denied,
             RoleSections = roles,
+            ClaudeVersionPolicy = claudeVersionPolicy,
         };
     }
+
+    /// <summary>"warn" (default, absent config) or "refuse" — SUG-15's opt-in, must default
+    /// to the non-breaking choice per the plan's constraints.</summary>
+    private static ClaudeVersionPolicy ParseClaudeVersionPolicy(string? raw, string repoPath, string globalPath) =>
+        raw switch
+        {
+            null => ClaudeVersionPolicy.Warn,
+            "warn" => ClaudeVersionPolicy.Warn,
+            "refuse" => ClaudeVersionPolicy.Refuse,
+            _ => throw new ConfigException(
+                $"claudeVersionPolicy must be 'warn' or 'refuse', got '{raw}', after merging {repoPath} over {globalPath}"),
+        };
 
     private static IReadOnlyList<string> RequireCommand(
         IReadOnlyList<string>? argv, string field, string repoPath, string globalPath)

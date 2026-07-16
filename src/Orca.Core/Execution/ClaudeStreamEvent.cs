@@ -15,6 +15,11 @@ public sealed record ClaudeStreamEvent
     public string? Subtype { get; init; }
     public string? SessionId { get; init; }
 
+    /// <summary>Top-level <c>claude_code_version</c> on a <c>system</c>/<c>init</c> event
+    /// (sibling to <see cref="SessionId"/>) — read leniently like every other init field
+    /// here: absence yields null, never a parse failure (SUG-15).</summary>
+    public string? ClaudeCodeVersion { get; init; }
+
     /// <summary>Non-null iff <see cref="Type"/> is <c>result</c>.</summary>
     public ClaudeResultSummary? Result { get; init; }
 
@@ -52,6 +57,7 @@ public sealed record ClaudeStreamEvent
             Result = type == "result" ? ClaudeResultSummary.Parse(root, line) : null,
             Error = StreamJson.OptionalString(root, "error"),
             RateLimit = type == "rate_limit_event" ? RateLimitInfo.Parse(root) : null,
+            ClaudeCodeVersion = StreamJson.OptionalString(root, "claude_code_version"),
             RawLine = line,
         };
     }
