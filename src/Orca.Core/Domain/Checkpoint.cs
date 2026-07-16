@@ -1,7 +1,14 @@
 namespace Orca.Core.Domain;
 
+/// <param name="Model">Optional per-checkpoint override of <c>roles.implementer.model</c>
+/// (SUG-05) — escalate a checkpoint the Planner judges unusually hard, or downgrade one
+/// it judges trivial, without changing every other checkpoint's tier.</param>
+/// <param name="MaxBudgetUsd">Optional per-checkpoint override of
+/// <c>roles.implementer.maxBudgetUsd</c>, same rationale as <see cref="Model"/>.</param>
 public sealed record Checkpoint(
     string Id,
     string Description,
     CheckpointStatus Status,
-    IReadOnlyList<string> AcceptanceCriteria);
+    IReadOnlyList<string> AcceptanceCriteria,
+    string? Model = null,
+    decimal? MaxBudgetUsd = null);

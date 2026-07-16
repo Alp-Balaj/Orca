@@ -97,6 +97,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
 
         string? sessionId = null;
         string? claudeCodeVersion = null;
+        string? observedModel = null;
         ClaudeResultSummary? result = null;
         var authenticationFailed = false;
         RateLimitInfo? lastRateLimit = null;
@@ -130,6 +131,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
                 {
                     sessionId ??= streamEvent.SessionId;
                     claudeCodeVersion ??= streamEvent.ClaudeCodeVersion;
+                    observedModel ??= streamEvent.Model;
                 }
                 if (streamEvent.Result is not null)
                     result = streamEvent.Result;
@@ -214,6 +216,7 @@ public sealed class ClaudeCodeExecutor : IClaudeExecutor
             AuthenticationFailed = authenticationFailed,
             LastRateLimit = lastRateLimit,
             ClaudeCodeVersion = claudeCodeVersion,
+            ObservedModel = observedModel,
             Elapsed = stopwatch.Elapsed,
         };
 
@@ -294,6 +297,12 @@ public sealed record ClaudeExecutionResult
     /// contract is only probed against the pin, and CLI updates land silently otherwise
     /// (SUG-15).</summary>
     public string? ClaudeCodeVersion { get; init; }
+
+    /// <summary>The model the init event reported this invocation actually resolved to —
+    /// distinct from <c>ClaudeInvocationOptions.Model</c> (what was requested), so a
+    /// behavior change stays attributable to the actual model even if a role's
+    /// configured tier and the CLI's resolution ever disagree (SUG-05).</summary>
+    public string? ObservedModel { get; init; }
 
     /// <summary>Derived, never stored separately, so it can't disagree with the
     /// evidence.</summary>

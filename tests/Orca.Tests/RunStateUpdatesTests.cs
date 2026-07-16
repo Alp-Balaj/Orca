@@ -81,6 +81,28 @@ public class RunStateUpdatesTests
     }
 
     [Fact]
+    public void Merges_the_observed_model()
+    {
+        // SUG-05: attributable actuals — the prompt-hash discipline already has this for
+        // prompts, extended to the model that actually ran.
+        var updated = RunStateUpdates.Apply(State(), Completed() with { ObservedModel = "claude-sonnet-5" }, Now);
+
+        Assert.Equal("claude-sonnet-5", updated.LastModel);
+    }
+
+    [Fact]
+    public void A_missing_observed_model_keeps_the_prior_one()
+    {
+        var first = RunStateUpdates.Apply(State(), Completed() with { ObservedModel = "claude-sonnet-5" }, Now);
+
+        // A later invocation whose init event never arrived (e.g. a very early crash)
+        // must not blank out an already-known model.
+        var second = RunStateUpdates.Apply(first, Completed() with { ObservedModel = null }, Now.AddMinutes(5));
+
+        Assert.Equal("claude-sonnet-5", second.LastModel);
+    }
+
+    [Fact]
     public void Cost_accumulates_across_invocations()
     {
         var once = RunStateUpdates.Apply(State(), Completed(), Now);

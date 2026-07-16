@@ -35,6 +35,15 @@ public sealed record RunState
     /// conflated with a refusal or a timeout kill.</summary>
     public required InvocationStopReason? LastStopReason { get; init; }
 
+    /// <summary>The model the most recent invocation's init event actually reported
+    /// (<c>ClaudeExecutionResult.ObservedModel</c>) — the attribution the prompt-hash
+    /// discipline above already has for prompts, extended to the other variable that
+    /// changes behavior (SUG-05). Not <c>required</c>, unlike every field above: it
+    /// defaults to null so every existing call site that builds a <see cref="RunState"/>
+    /// directly (every test fixture, not only real runs) keeps compiling and behaving
+    /// exactly as before this field existed.</summary>
+    public string? LastModel { get; init; }
+
     public required DateTimeOffset StartedAt { get; init; }
     public required DateTimeOffset UpdatedAt { get; init; }
 }

@@ -14,6 +14,7 @@ public static class RunStateUpdates
             AccumulatedCostUsd = state.AccumulatedCostUsd + (execution.Result?.TotalCostUsd ?? 0m),
             LastUsage = execution.Result?.Usage ?? state.LastUsage,
             LastStopReason = execution.StopReason,
+            LastModel = execution.ObservedModel ?? state.LastModel,
             UpdatedAt = now,
         };
 }

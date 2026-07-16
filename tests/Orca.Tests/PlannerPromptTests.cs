@@ -26,6 +26,16 @@ public class PlannerPromptTests
     }
 
     [Fact]
+    public void The_role_prompt_documents_the_per_checkpoint_model_and_budget_overrides()
+    {
+        // SUG-05: the schema accepting `model`/`max_budget_usd` only matters if the
+        // Planner is actually told about them — otherwise "no other keys" (the prompt's
+        // own older wording) would keep it from ever using the feature.
+        Assert.Contains("max_budget_usd", PlannerPrompt.RoleText);
+        Assert.Contains("use sparingly", PlannerPrompt.RoleText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void The_initial_prompt_carries_the_full_request_block()
     {
         var prompt = PlannerPrompt.AssembleInitial(

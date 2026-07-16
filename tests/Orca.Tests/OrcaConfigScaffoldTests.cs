@@ -98,6 +98,26 @@ public sealed class OrcaConfigScaffoldTests : IDisposable
     }
 
     [Fact]
+    public void Scaffold_ships_the_opinionated_model_tier_by_default()
+    {
+        // SUG-05: the manual pattern this scaffold replicates is "higher model plans,
+        // Sonnet/Haiku implements" — a fresh orca.json must not need a human to remember
+        // to configure that tiering.
+        var config = LoadScaffold(new DetectedCommands
+        {
+            Build = ["dotnet", "build", "MyApp.slnx"],
+            Test = ["dotnet", "test", "MyApp.slnx"],
+            Summary = "test",
+            IsPlaceholder = false,
+        });
+
+        Assert.Equal("opus", config.GetRole(RoleName.Planner).Model);
+        Assert.Equal("sonnet", config.GetRole(RoleName.Implementer).Model);
+        Assert.Equal("haiku", config.GetRole(RoleName.Reconciler).Model);
+        Assert.Equal("sonnet", config.GetRole(RoleName.Verifier).Model);
+    }
+
+    [Fact]
     public void Placeholder_commands_still_produce_a_loadable_config()
     {
         // The REPLACE_ME fallback must load (so the scaffold-then-review file appears); it is the

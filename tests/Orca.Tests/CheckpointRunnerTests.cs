@@ -155,6 +155,78 @@ public sealed class CheckpointRunnerTests : IDisposable
     }
 
     [Fact]
+    public void Prepare_uses_the_checkpoints_own_model_and_budget_override_when_present()
+    {
+        // SUG-05: the Planner's escalate-a-hard-checkpoint lever must actually reach the
+        // executor options, not just parse — a separate, isolated vault/plan so the
+        // shared PlanText fixture (and every other test resolving it via a null planId)
+        // stays untouched.
+        var vault = Directory.CreateTempSubdirectory("orca-vault-override-test-").FullName;
+        try
+        {
+            var planDir = Path.Combine(vault, "Plans", "override-plan");
+            Directory.CreateDirectory(planDir);
+            File.WriteAllText(Path.Combine(planDir, "override-plan.md"), """
+                ---
+                schema_version: 1
+                plan_id: override-plan
+                plan_version: 1
+                title: Override plan
+                status: approved
+                target_repo: RecipeApp
+                base_branch: main
+                created: 2026-07-06T14:00:00Z
+                updated: 2026-07-06T14:00:00Z
+                planning:
+                  strategy: single_candidate
+                checkpoints:
+                  - id: 01-hairy-migration
+                    description: A checkpoint judged hard enough to escalate
+                    status: pending
+                    acceptance_criteria:
+                      - It works
+                    model: opus
+                    max_budget_usd: 8
+                ---
+                Plan body.
+                """);
+
+            var config = Config() with { VaultRoot = vault };
+            var runner = new CheckpointRunner(config, GitWorkspace.Discover(_repo.Root), new FakeExecutor(_repo));
+
+            var preview = runner.Prepare("override-plan", null);
+
+            Assert.Equal("opus", preview.Options.Model);
+            Assert.Equal(8m, preview.Options.MaxBudgetUsd);
+        }
+        finally
+        {
+            Directory.Delete(vault, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Prepare_falls_back_to_the_role_default_when_a_checkpoint_has_no_override()
+    {
+        // The ordinary case: roles.implementer's own model/budget is unchanged when a
+        // checkpoint sets neither — recipe-tagging's 01-tag-entity carries no override.
+        var baseConfig = Config();
+        var config = baseConfig with
+        {
+            RoleSections = baseConfig.RoleSections with
+            {
+                Implementer = baseConfig.RoleSections.Implementer! with { Model = "sonnet", MaxBudgetUsd = 5m },
+            },
+        };
+        var runner = new CheckpointRunner(config, GitWorkspace.Discover(_repo.Root), new FakeExecutor(_repo));
+
+        var preview = runner.Prepare(null, null);
+
+        Assert.Equal("sonnet", preview.Options.Model);
+        Assert.Equal(5m, preview.Options.MaxBudgetUsd);
+    }
+
+    [Fact]
     public void Prepare_without_denied_tools_omits_the_settings_payload()
     {
         var preview = Runner(new FakeExecutor(_repo), deniedTools: []).Prepare(null, null);

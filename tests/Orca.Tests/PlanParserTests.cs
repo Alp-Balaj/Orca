@@ -63,6 +63,19 @@ public class PlanParserTests
     }
 
     [Fact]
+    public void Parses_a_per_checkpoint_model_and_budget_override()
+    {
+        var plan = ParseFixture("valid", "checkpoint-model-override.md");
+
+        Assert.Equal("opus", plan.Checkpoints[0].Model);
+        Assert.Equal(8m, plan.Checkpoints[0].MaxBudgetUsd);
+
+        // The ordinary case: no override on the second checkpoint.
+        Assert.Null(plan.Checkpoints[1].Model);
+        Assert.Null(plan.Checkpoints[1].MaxBudgetUsd);
+    }
+
+    [Fact]
     public void Accepts_crlf_line_endings_and_preserves_them_in_the_body()
     {
         var path = FixturePath("valid", "recipe-tagging.md");
@@ -92,6 +105,7 @@ public class PlanParserTests
         { "14-bad-timestamp.md", "ISO-8601" },
         { "15-bad-checkpoint-id.md", "must match" },
         { "16-duplicate-key.md", "key" },
+        { "17-non-positive-checkpoint-budget.md", "max_budget_usd" },
     };
 
     [Theory]

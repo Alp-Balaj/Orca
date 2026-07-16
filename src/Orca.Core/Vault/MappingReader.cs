@@ -49,6 +49,16 @@ internal sealed class MappingReader
 
     internal string? OptionalString(string key) => Has(key) ? RequireString(key) : null;
 
+    internal decimal? OptionalDecimal(string key)
+    {
+        if (!Has(key))
+            return null;
+        var scalar = RequireScalar(key);
+        if (IsNull(scalar) || !decimal.TryParse(scalar.Value, NumberStyles.Number, CultureInfo.InvariantCulture, out var value))
+            throw Violation($"'{key}' must be a number");
+        return value;
+    }
+
     internal int RequireInt(string key)
     {
         var scalar = RequireScalar(key);

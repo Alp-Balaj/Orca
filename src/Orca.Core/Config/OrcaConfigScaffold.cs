@@ -54,6 +54,12 @@ public static class OrcaConfigScaffold
             gateTimeoutSeconds = 600,
             maxParseRetries = 2,
             maxCheckpointAttempts = 3,
+            // Opinionated model tiering by default (SUG-05): the manual pattern this
+            // scaffold is meant to replicate is "higher model plans, Sonnet/Haiku
+            // implements" — without it every role silently runs the CLI's own default and
+            // the tiering only happens if a human remembers to configure it. A configured
+            // model your plan doesn't offer fails loud at invocation time (README note),
+            // never here.
             roles = new
             {
                 planner = new
@@ -61,6 +67,7 @@ public static class OrcaConfigScaffold
                     allowedTools = new[] { "Read", "Write", "Edit" },
                     maxTurns = 30,
                     timeoutSeconds = 900,
+                    model = "opus",
                     maxBudgetUsd = 2,
                 },
                 implementer = new
@@ -73,6 +80,7 @@ public static class OrcaConfigScaffold
                     },
                     maxTurns = 60,
                     timeoutSeconds = 1800,
+                    model = "sonnet",
                     maxBudgetUsd = 5,
                 },
                 reconciler = new
@@ -80,6 +88,7 @@ public static class OrcaConfigScaffold
                     allowedTools = new[] { "Read", "Write", "Edit" },
                     maxTurns = 15,
                     timeoutSeconds = 600,
+                    model = "haiku",
                     maxBudgetUsd = 2,
                 },
                 verifier = new
@@ -87,6 +96,7 @@ public static class OrcaConfigScaffold
                     allowedTools = new[] { "Read", "Write", "Edit" },
                     maxTurns = 15,
                     timeoutSeconds = 600,
+                    model = "sonnet",
                     maxBudgetUsd = 2,
                 },
             },
