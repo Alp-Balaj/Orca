@@ -234,6 +234,27 @@ public sealed class SingleCandidatePlanningStrategy(
 
         var plan = PlanParser.Parse(File.ReadAllText(preview.PlanFilePath), preview.PlanFilePath);
         GeneratedPlanRules.Validate(plan, request, Kind, preview.PlanFilePath);
+
+        // SUG-04, Planner contract v2: one child note per checkpoint, validated with the
+        // same fail-loud discipline as the plan itself so a missing or malformed brief
+        // feeds the §5.4 retry instead of surfacing as "(none)" at implementation time.
+        foreach (var checkpoint in plan.Checkpoints)
+        {
+            var childPath = _layout.ChildNoteFile(plan.PlanId, checkpoint.Id);
+            if (!File.Exists(childPath))
+                throw new VaultException(
+                    $"the Planner wrote no child note for checkpoint '{checkpoint.Id}' — one per checkpoint " +
+                    $"is required (expected {childPath})");
+
+            var note = ChildNoteParser.Parse(File.ReadAllText(childPath), childPath);
+            if (!string.Equals(note.PlanId, plan.PlanId, StringComparison.Ordinal))
+                throw new VaultSchemaException(childPath,
+                    $"child note names plan '{note.PlanId}' but belongs to plan '{plan.PlanId}'");
+            if (string.IsNullOrWhiteSpace(note.Body))
+                throw new VaultSchemaException(childPath,
+                    $"child note for checkpoint '{checkpoint.Id}' has an empty body — an empty brief is no brief");
+        }
+
         return plan;
     }
 

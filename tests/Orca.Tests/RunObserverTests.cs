@@ -520,6 +520,9 @@ public sealed class PlanningObserverTests : IDisposable
     {
         Directory.CreateDirectory(Path.GetDirectoryName(PlanPath)!);
         File.WriteAllText(PlanPath, text);
+        // SUG-04 contract v2: generation-time validation requires each checkpoint's brief.
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(PlanPath)!, "01-tag-entity.md"),
+            "---\nschema_version: 1\nplan_id: recipe-tagging\ncheckpoint_id: 01-tag-entity\n---\n\nBrief.\n");
     }
 
     [Fact]

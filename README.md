@@ -305,8 +305,13 @@ never re-paid.
 
 `plan-generate` runs the Planner: one `claude -p` invocation, working directory = the
 vault, scoped by `roles.planner`, that must write a schema-valid **draft** plan file
-(`prompts/planner.md` carries the exact contract; the Planner can never self-approve).
-The produced file is parsed by the real plan parser; a parse/validation failure feeds a
+**plus one child note per checkpoint** (`<checkpoint-id>.md` beside the plan file — the
+per-checkpoint implementation brief the Implementer prompt embeds as its "Detailed
+instructions": approach, files, patterns to follow, scope fences, open questions;
+SUG-04). All files are part of the same draft review — edit child notes in Obsidian like
+everything else before approving. (`prompts/planner.md` carries the exact contracts; the
+Planner can never self-approve.) Every produced file is parsed fail-loud — the plan by
+the real plan parser, each child note by the child-note parser; any failure feeds a
 capped Reflexion-style retry (`maxParseRetries`) whose prompt quotes the exact error.
 How much deliberation a plan deserves is your call — `--strategy` or an interactive
 prompt, never auto-decided; multi-candidate is deferred until the implementer loop is
