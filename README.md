@@ -243,7 +243,15 @@ verdicts, the working-tree diffstat, and the decision prompt:
   and comes straight back to this prompt without re-invoking anything.
 
 **4. Check where things stand** any time: `orca status --repo <repo>` — plan,
-checkpoints, latest verification verdict, accumulated cost.
+checkpoints, latest verification verdict, accumulated cost. The same evidence also
+renders as a vault note: `Dashboard.md`, a sibling of the plans directory, regenerated
+automatically after every checkpoint decision (both lanes) and on
+`orca status --write-dashboard` (SUG-07). It carries a focus line (the single next
+action, by urgency), the next-up list, owed loose ends detected from evidence
+(approved-but-unmerged branches, passing verification vs. still-pending status, stale
+drafts), and a per-plan spend table — wikilinked, dataview-friendly, and **generated,
+never authoritative**: the banner says so and a write failure only warns, never blocks
+a run.
 
 Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its own.
 
@@ -271,7 +279,7 @@ record from machine facts alone and spends nothing on the LLM roles.
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
                        [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
-    orca status [--plan <id>] [--repo <path>]
+    orca status [--plan <id>] [--write-dashboard] [--repo <path>]
     orca ui [--repo <path>]
     orca                        (no arguments, on an interactive terminal — opens the TUI)
 

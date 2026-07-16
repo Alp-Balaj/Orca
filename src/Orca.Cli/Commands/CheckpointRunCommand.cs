@@ -74,6 +74,15 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
             var result = await session.ExecuteAsync(preview, gate);
             var exitCode = Render(result, gate);
 
+            // SUG-07: every decision refreshes the cockpit note; a failure here warns
+            // and never blocks the run's outcome.
+            if (result.Outcome is CheckpointSessionOutcome.Approved
+                or CheckpointSessionOutcome.Rejected or CheckpointSessionOutcome.Deferred)
+            {
+                if (DashboardWriter.TryWrite(config, workspace, out var dashboardWarning) is null)
+                    AnsiConsole.MarkupLine($"[yellow]{dashboardWarning!.EscapeMarkup()}[/]");
+            }
+
             if (result.Outcome != CheckpointSessionOutcome.Approved || !interactive)
                 return exitCode;
 

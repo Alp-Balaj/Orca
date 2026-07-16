@@ -332,7 +332,13 @@ internal sealed class MainScreen : Window
                 return;
         }
 
-        RunScreen.Run(session, preview);
+        var result = RunScreen.Run(session, preview);
+
+        // SUG-07: a decision refreshes the cockpit note. Silent on failure by design —
+        // the dashboard is a convenience view; the TUI itself shows the live truth.
+        if (result?.Outcome is CheckpointSessionOutcome.Approved
+            or CheckpointSessionOutcome.Rejected or CheckpointSessionOutcome.Deferred)
+            DashboardWriter.TryWrite(_config, _workspace, out _);
 
         // Session over — the workflow stops (no auto-advance): rebuild and refresh, keeping
         // the selection so the just-run checkpoint stays put with its updated evidence.

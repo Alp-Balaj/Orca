@@ -24,6 +24,10 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         [CommandOption("--repo <PATH>")]
         [Description("Target repo (any directory inside it). Defaults to the current directory.")]
         public string? Repo { get; init; }
+
+        [CommandOption("--write-dashboard")]
+        [Description("Also regenerate the vault's Dashboard.md from current evidence (SUG-07).")]
+        public bool WriteDashboard { get; init; }
     }
 
     public override int Execute(CommandContext context, Settings settings)
@@ -65,6 +69,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         if (state is null)
         {
             AnsiConsole.MarkupLine("no runs yet — [bold]orca checkpoint-run[/] starts the first pending checkpoint.");
+            if (settings.WriteDashboard)
+                WriteDashboardNote(config, workspace);
             return 0;
         }
 
@@ -88,7 +94,19 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             runTable.AddRow("last usage", $"in {usage.InputTokens}, out {usage.OutputTokens}, cache read {usage.CacheReadInputTokens}");
         runTable.AddRow("started / updated", $"{state.StartedAt:u} / {state.UpdatedAt:u}");
         AnsiConsole.Write(new Panel(runTable).Header("run state"));
+
+        if (settings.WriteDashboard)
+            WriteDashboardNote(config, workspace);
+
         return 0;
+    }
+
+    private static void WriteDashboardNote(OrcaConfig config, GitWorkspace workspace)
+    {
+        if (DashboardWriter.TryWrite(config, workspace, out var warning) is { } path)
+            AnsiConsole.MarkupLine($"[green]dashboard updated:[/] {path.EscapeMarkup()}");
+        else
+            AnsiConsole.MarkupLine($"[yellow]{warning!.EscapeMarkup()}[/]");
     }
 
     private static string SchemaYaml(GateOutcome outcome) =>
