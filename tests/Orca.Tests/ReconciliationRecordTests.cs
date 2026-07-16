@@ -61,6 +61,41 @@ public sealed class ReconciliationRecordTests
     }
 
     [Fact]
+    public void Missing_and_extra_items_round_trip_every_line_separator()
+    {
+        var separators = new string([(char)0x0085, (char)0x2028, (char)0x2029]);
+        var missingItem = $"missing{separators}item";
+        var extraItem = $"extra{separators}item";
+
+        var record = Record(ReconciliationVerdict.Partial, missing: [missingItem], extra: [extraItem]);
+        var text = ReconciliationRecordSerializer.Serialize(record);
+        var reparsed = ReconciliationRecordParser.Parse(text, "01-tag-entity.attempt-2.md");
+
+        Assert.Equal(text, ReconciliationRecordSerializer.Serialize(reparsed));
+        Assert.Equal([missingItem], reparsed.Missing);
+        Assert.Equal([extraItem], reparsed.Extra);
+    }
+
+    [Theory]
+    [InlineData(0x00)]
+    [InlineData(0x01)]
+    [InlineData(0x1b)]
+    [InlineData(0x1f)]
+    [InlineData(0x80)]
+    [InlineData(0x9f)]
+    public void Other_c0_and_c1_controls_round_trip_byte_stably_in_an_extra_item(int codePoint)
+    {
+        var extraItem = $"extra{(char)codePoint}item";
+
+        var record = Record(extra: [extraItem]);
+        var text = ReconciliationRecordSerializer.Serialize(record);
+        var reparsed = ReconciliationRecordParser.Parse(text, "01-tag-entity.attempt-2.md");
+
+        Assert.Equal(text, ReconciliationRecordSerializer.Serialize(reparsed));
+        Assert.Equal([extraItem], reparsed.Extra);
+    }
+
+    [Fact]
     public void Parses_the_documented_shape()
     {
         var record = ReconciliationRecordParser.Parse(ValidText, "01-tag-entity.attempt-2.md");
