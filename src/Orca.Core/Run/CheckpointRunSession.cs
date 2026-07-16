@@ -210,6 +210,23 @@ public sealed class CheckpointRunSession(
         switch (decision.Choice)
         {
             case CheckpointChoice.Approve:
+                // BF-19: a verification record only speaks for the tree it was computed
+                // against. Between that moment and this one — most realistically, a
+                // Defer left the branch checked out and dirty for a later session — the
+                // tree can drift, and StageAllAndCommit below would commit whatever is
+                // here now under a verdict that certified something else. Refuse rather
+                // than let a stale green record wave through an unverified change; old
+                // records (no WorkingTreeHash) were never given this guarantee, so they
+                // are not retroactively checked.
+                if (verification?.Record?.WorkingTreeHash is { } certifiedHash
+                    && workspace.WorkingTreeHash() != certifiedHash)
+                    throw new CheckpointRunException(
+                        $"the working tree has changed since checkpoint '{preview.Checkpoint.Id}' attempt " +
+                        $"{verification.Record.Attempt}'s verification ran — the gates, Reconciler, and " +
+                        "Verifier certified a different tree than what's here now, so approving would commit " +
+                        "an unverified change. Re-run checkpoint-run to verify the current tree before " +
+                        "approving, or reject/discard if the extra changes were unintended.");
+
                 var sha = _runner.Approve(preview, attemptCostUsd);
 
                 // The flip is applied only once the commit itself has succeeded — a

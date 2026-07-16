@@ -30,6 +30,11 @@ public sealed record SemanticCriterionResult(string Criterion, SemanticVerdict V
 /// the recorded results, and <c>VerificationRules</c> rejects inconsistent records on both
 /// read and write. The body holds relevant excerpts only — full transcripts stay in the
 /// gitignored .orca/runs/ directory.</summary>
+/// <param name="WorkingTreeHash">Content fingerprint (<see cref="Git.GitWorkspace.WorkingTreeHash"/>)
+/// of the tree the gates certified, captured the moment they finished. Approve compares this
+/// against the tree it's about to commit and refuses on a mismatch (BF-19: a recorded green
+/// verdict must be bound to the bytes it certifies). Null on records written before this field
+/// existed — old records are never retroactively checked, only new ones.</param>
 public sealed record VerificationRecord(
     int SchemaVersion,
     string PlanId,
@@ -40,4 +45,5 @@ public sealed record VerificationRecord(
     GateResults Gates,
     IReadOnlyList<SemanticCriterionResult>? Semantic,
     VerificationVerdict Verdict,
-    string Body);
+    string Body,
+    string? WorkingTreeHash = null);

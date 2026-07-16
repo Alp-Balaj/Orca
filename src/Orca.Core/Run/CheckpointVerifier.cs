@@ -123,9 +123,16 @@ public sealed class CheckpointVerifier(
         observer?.OnRunEvent(new RunObservation.GateFinished(tests));
         baseline = baseline with { BuildGate = build, TestsGate = tests };
 
+        // Captured now, right as the gates finish — the fingerprint of the exact tree
+        // they just certified (BF-19). Approve later recomputes it and refuses to commit
+        // on a mismatch, so a recorded green verdict can never outlive the bytes it
+        // certifies. WorkingTreeHash only ever touches a scratch index, so it disturbs
+        // neither the real index nor FullDiff's later git status/diff reads.
+        var treeHash = workspace.WorkingTreeHash();
+
         if (build.Outcome == GateOutcome.Fail || tests.Outcome == GateOutcome.Fail)
         {
-            var failedRecord = ComposeRecord(identity, build, tests, checklist: null);
+            var failedRecord = ComposeRecord(identity, build, tests, checklist: null, treeHash);
             var path = writer.WriteVerificationRecord(failedRecord);
             observer?.OnRunEvent(new RunObservation.VaultRecordWritten("verification", path));
             return baseline with { Record = failedRecord, RecordPath = path };
@@ -189,7 +196,7 @@ public sealed class CheckpointVerifier(
         if (verifierRole.Failure is not null)
             return Failed(baseline, verifierRole.Failure);
 
-        var record = ComposeRecord(identity, build, tests, verifierRole.Value!);
+        var record = ComposeRecord(identity, build, tests, verifierRole.Value!, treeHash);
         var recordPath = writer.WriteVerificationRecord(record);
         observer?.OnRunEvent(new RunObservation.VaultRecordWritten("verification", recordPath));
         File.Delete(semanticStaging);
@@ -303,7 +310,8 @@ public sealed class CheckpointVerifier(
     }
 
     private VerificationRecord ComposeRecord(
-        AttemptIdentity identity, GateCommandResult build, GateCommandResult tests, SemanticChecklist? checklist)
+        AttemptIdentity identity, GateCommandResult build, GateCommandResult tests, SemanticChecklist? checklist,
+        string treeHash)
     {
         var gates = new GateResults(build.Outcome, tests.Outcome);
         var gatesPass = gates.Build == GateOutcome.Pass && gates.Tests == GateOutcome.Pass;
@@ -322,12 +330,15 @@ public sealed class CheckpointVerifier(
             gates,
             semantic,
             verdict,
-            ComposeBody(build, tests, checklist));
+            ComposeBody(build, tests, checklist),
+            treeHash);
     }
 
     /// <summary>The record body: relevant excerpts only (approved step-2 rule) — one line
-    /// per gate with a pointer to the full run log, the failing gates' tails, and the
-    /// Verifier's prose when the semantic layer ran.</summary>
+    /// per gate with a pointer to the full run log, each gate's output tail (BF-19: a
+    /// pass needs to be auditable after the fact too, not only a failure — the pointed-to
+    /// run log is gitignored and does not reliably survive), and the Verifier's prose when
+    /// the semantic layer ran.</summary>
     private string ComposeBody(GateCommandResult build, GateCommandResult tests, SemanticChecklist? checklist)
     {
         var sb = new System.Text.StringBuilder();
@@ -335,7 +346,7 @@ public sealed class CheckpointVerifier(
         AppendGateLine(sb, build);
         AppendGateLine(sb, tests);
 
-        foreach (var gate in new[] { build, tests }.Where(g => g.Outcome == GateOutcome.Fail))
+        foreach (var gate in new[] { build, tests })
         {
             sb.Append($"\n### {gate.Gate} output (last {GateRunner.TailLineCount} lines)\n\n");
             sb.Append("````text\n");

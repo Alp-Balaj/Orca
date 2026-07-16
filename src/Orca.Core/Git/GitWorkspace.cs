@@ -128,6 +128,34 @@ public sealed class GitWorkspace
         return sb.ToString();
     }
 
+    /// <summary>Content fingerprint of the current working tree (tracked + untracked,
+    /// respecting .gitignore — the same universe <see cref="StageAllAndCommit"/> commits),
+    /// independent of commit metadata like timestamps: two calls over identical content
+    /// always agree, and any content change anywhere changes it. A clean tree fingerprints
+    /// to HEAD's own tree, so this is well-defined whether or not anything is uncommitted.
+    /// Builds the tree via a scratch index (<c>GIT_INDEX_FILE</c> pointed at a throwaway
+    /// file) seeded from HEAD then `add -A`'d — a fact-finding read that never touches the
+    /// repo's real index or working tree. (<c>git stash create -u</c> was tried first and
+    /// rejected: on git 2.54, it silently drops untracked files that live inside an
+    /// untracked *directory* — exactly the shape of "Implementer adds a new file in a new
+    /// folder" — which would have made this fingerprint wrong in an ordinary case, not an
+    /// edge case.)</summary>
+    public string WorkingTreeHash()
+    {
+        var scratchIndex = Path.Combine(Path.GetTempPath(), $"orca-index-{Guid.NewGuid():N}");
+        try
+        {
+            var env = new Dictionary<string, string> { ["GIT_INDEX_FILE"] = scratchIndex };
+            GitProcess.Run(RepoRoot, ["read-tree", "HEAD"], environment: env);
+            GitProcess.Run(RepoRoot, ["add", "-A"], environment: env);
+            return GitProcess.Run(RepoRoot, ["write-tree"], environment: env).Stdout.Trim();
+        }
+        finally
+        {
+            File.Delete(scratchIndex);
+        }
+    }
+
     public string CurrentBranch()
     {
         var branch = GitProcess.Run(RepoRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).Stdout.Trim();

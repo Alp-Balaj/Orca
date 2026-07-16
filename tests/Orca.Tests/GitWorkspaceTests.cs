@@ -277,6 +277,61 @@ public sealed class GitWorkspaceTests : IDisposable
     }
 
     [Fact]
+    public void WorkingTreeHash_is_deterministic_and_content_sensitive()
+    {
+        var workspace = Workspace();
+        _repo.WriteFile("README.md", "seed\nchanged\n");
+
+        var first = workspace.WorkingTreeHash();
+        var second = workspace.WorkingTreeHash();
+        Assert.Equal(first, second);
+
+        _repo.WriteFile("README.md", "seed\nchanged differently\n");
+        Assert.NotEqual(first, workspace.WorkingTreeHash());
+    }
+
+    [Fact]
+    public void WorkingTreeHash_is_well_defined_on_a_clean_tree()
+    {
+        var workspace = Workspace();
+        Assert.True(workspace.IsClean());
+
+        var hash = workspace.WorkingTreeHash();
+
+        Assert.Equal(_repo.Git("rev-parse", "HEAD^{tree}").Trim(), hash);
+    }
+
+    [Fact]
+    public void WorkingTreeHash_covers_an_untracked_file_inside_a_new_untracked_directory()
+    {
+        // Regression case: `git stash create -u` (tried first) silently drops untracked
+        // files that live inside an untracked *directory* on git 2.54 — exactly what an
+        // Implementer attempt normally produces (a new file in a new folder), which is an
+        // ordinary case, not an edge case. Confirmed empirically before picking the
+        // GIT_INDEX_FILE-based implementation actually shipped.
+        var workspace = Workspace();
+        var before = workspace.WorkingTreeHash();
+
+        _repo.WriteFile("src/New/Nested.cs", "// brand new, nested, untracked\n");
+
+        Assert.NotEqual(before, workspace.WorkingTreeHash());
+    }
+
+    [Fact]
+    public void WorkingTreeHash_never_touches_the_real_index_or_working_tree()
+    {
+        var workspace = Workspace();
+        _repo.WriteFile("README.md", "seed\nchanged\n");
+        _repo.WriteFile("untracked/new.txt", "new\n");
+        var statusBefore = workspace.StatusLines();
+
+        workspace.WorkingTreeHash();
+
+        Assert.Equal(statusBefore, workspace.StatusLines());
+        Assert.Empty(_repo.Git("diff", "--cached", "--name-only")); // real index still empty
+    }
+
+    [Fact]
     public void FullDiff_preserves_binary_detection_for_untracked_files()
     {
         var workspace = Workspace();

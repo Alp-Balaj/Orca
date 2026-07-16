@@ -22,6 +22,11 @@ public static class VerificationRecordSerializer
         sb.Append("gates:\n");
         sb.Append("  build: ").Append(SchemaEnums.ToYaml(record.Gates.Build)).Append('\n');
         sb.Append("  tests: ").Append(SchemaEnums.ToYaml(record.Gates.Tests)).Append('\n');
+        // Omitted (not written as an explicit null) when absent, matching the existing
+        // optional-scalar convention (see the semantic item's `note` field below) — read
+        // back with OptionalString, which treats a missing key as null.
+        if (record.WorkingTreeHash is not null)
+            sb.Append("working_tree_hash: ").Append(record.WorkingTreeHash).Append('\n');
 
         if (record.Semantic is null)
         {

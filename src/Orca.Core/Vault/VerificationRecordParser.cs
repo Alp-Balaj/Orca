@@ -26,6 +26,8 @@ public static class VerificationRecordParser
             SchemaEnums.ParseGateOutcome(gatesReader.RequireString("tests"), filePath));
         gatesReader.ThrowIfUnknownKeys();
 
+        var workingTreeHash = fm.OptionalString("working_tree_hash");
+
         IReadOnlyList<SemanticCriterionResult>? semantic = null;
         if (fm.RequireSequenceOrNull("semantic") is { } semanticNodes)
         {
@@ -52,7 +54,7 @@ public static class VerificationRecordParser
 
         var record = new VerificationRecord(
             schemaVersion, planId, planVersion, checkpointId, attempt, timestamp,
-            gates, semantic, verdict, body);
+            gates, semantic, verdict, body, workingTreeHash);
         VerificationRules.Validate(record, filePath);
         return record;
     }
