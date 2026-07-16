@@ -24,7 +24,9 @@ namespace Orca.Cli.Tui;
 internal static class TuiModal
 {
     /// <summary>One bound key: its display hint (e.g. "enter run") and the value returned
-    /// when pressed.</summary>
+    /// when pressed. An empty <paramref name="Hint"/> registers a silent accelerator — the
+    /// key still works but is left out of the footer, so a second key can share a choice's
+    /// result (e.g. <c>c</c> alongside the <c>enter</c> default) without doubling the hint.</summary>
     internal readonly record struct Choice<T>(Key Key, string Hint, T Result);
 
     /// <summary>Show the modal and block until a bound key is pressed. If the window is
@@ -95,6 +97,8 @@ internal static class TuiModal
         var runs = new List<StyledRun>();
         foreach (var choice in choices)
         {
+            if (string.IsNullOrEmpty(choice.Hint))
+                continue;   // silent accelerator — bound, but not shown in the footer
             if (runs.Count > 0)
                 runs.Add(new StyledRun(" · ", TuiRole.Faint));
             runs.Add(new StyledRun(choice.Hint, TuiRole.Faint));
