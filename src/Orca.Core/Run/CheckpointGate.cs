@@ -10,6 +10,12 @@ public sealed record CheckpointDecision
     /// (spec §7.1 — offered, never automatic).</summary>
     public bool DiscardChanges { get; init; }
 
+    /// <summary>Reject only, optional: the human's one-line reason (SUG-11 §4). Persisted
+    /// as an append-only vault note and carried into the next attempt's prompt — without
+    /// it, a rejection of an all-green attempt reaches the retry as misleading
+    /// "the findings below are why it did not stand" over passing findings.</summary>
+    public string? RejectionNote { get; init; }
+
     /// <summary>True when a non-interactive front end defaulted to Defer because no
     /// human could answer (§3.6 exit-code mapping). Never set by a real choice.</summary>
     public bool AutoDeferred { get; init; }

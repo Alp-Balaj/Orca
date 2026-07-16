@@ -544,6 +544,52 @@ public sealed class CheckpointRunSessionTests : IDisposable
     }
 
     [Fact]
+    public async Task Reject_with_a_note_persists_it_and_the_next_prompt_carries_it()
+    {
+        CommitOrcaIgnore();
+        var gate = new ScriptedGate
+        {
+            Decision = new CheckpointDecision
+            {
+                Choice = CheckpointChoice.Reject,
+                DiscardChanges = true,
+                RejectionNote = "the endpoint name violates our API naming convention",
+            },
+        };
+        var session = Session(GreenPipelineExecutor());
+
+        var result = await session.ExecuteAsync(session.Prepare(null, null), gate);
+
+        Assert.Equal(CheckpointSessionOutcome.Rejected, result.Outcome);
+        var layout = new VaultLayout(_vault, "Plans");
+        var notePath = layout.RejectionFile("recipe-tagging", "01-tag-entity", 1);
+        Assert.True(File.Exists(notePath));
+        Assert.Contains("API naming convention", File.ReadAllText(notePath));
+
+        // SUG-11 §4: attempt 2's prompt carries the human's reason, and — because the
+        // records were green — reframes the findings as a human rejection, not a failure.
+        var nextPrompt = Session(new ScriptedExecutor()).Prepare(null, "01-tag-entity").Prompt;
+        Assert.Contains("Human rejection of attempt 1", nextPrompt);
+        Assert.Contains("API naming convention", nextPrompt);
+        Assert.Contains("passed verification but was rejected by\nthe human", nextPrompt);
+    }
+
+    [Fact]
+    public async Task Reject_without_a_note_writes_no_rejection_file()
+    {
+        CommitOrcaIgnore();
+        var gate = new ScriptedGate
+        {
+            Decision = new CheckpointDecision { Choice = CheckpointChoice.Reject, DiscardChanges = false },
+        };
+        var session = Session(GreenPipelineExecutor());
+
+        await session.ExecuteAsync(session.Prepare(null, null), gate);
+
+        Assert.False(Directory.Exists(new VaultLayout(_vault, "Plans").RejectionDirectory("recipe-tagging")));
+    }
+
+    [Fact]
     public async Task Defer_leaves_the_attempt_pending_for_the_next_session()
     {
         CommitOrcaIgnore();
