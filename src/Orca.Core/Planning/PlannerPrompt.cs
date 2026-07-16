@@ -43,8 +43,9 @@ public static class PlannerPrompt
         if (request.Title is not null)
             sb.Append($"- title to use verbatim: {request.Title}\n");
         sb.Append("\n### Goal brief\n\n");
-        sb.Append(request.Goal.ReplaceLineEndings("\n").TrimEnd());
-        sb.Append('\n');
+        // BF-10 §2: a goal file carrying its own "## Request" heading must not collide
+        // with this prompt's section grammar — fenced, it reads as the brief it is.
+        AppendFenced(sb, request.Goal);
 
         if (previousError is not null)
         {
@@ -59,5 +60,12 @@ public static class PlannerPrompt
         }
 
         return sb.ToString();
+    }
+
+    private static void AppendFenced(StringBuilder sb, string content)
+    {
+        var text = content.ReplaceLineEndings("\n").TrimEnd();
+        var fence = new string('`', Math.Max(4, Orca.Core.Run.ReconcilerPrompt.LongestBacktickRun(text) + 1));
+        sb.Append(fence).Append('\n').Append(text).Append('\n').Append(fence).Append('\n');
     }
 }

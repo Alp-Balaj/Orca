@@ -92,7 +92,10 @@ public static class CheckpointPrompt
             }
 
             if (record.Body.Trim().Length > 0)
-                sb.Append('\n').Append(record.Body.ReplaceLineEndings("\n").TrimEnd()).Append('\n');
+            {
+                sb.Append('\n');
+                ReconcilerPrompt.AppendFenced(sb, "text", record.Body);
+            }
         }
 
         if (feedback.Reconciliation is { } reconciliation)
@@ -101,7 +104,10 @@ public static class CheckpointPrompt
             AppendItems(sb, "missing", reconciliation.Missing);
             AppendItems(sb, "extra", reconciliation.Extra);
             if (reconciliation.Body.Trim().Length > 0)
-                sb.Append('\n').Append(reconciliation.Body.ReplaceLineEndings("\n").TrimEnd()).Append('\n');
+            {
+                sb.Append('\n');
+                ReconcilerPrompt.AppendFenced(sb, "text", reconciliation.Body);
+            }
         }
     }
 
