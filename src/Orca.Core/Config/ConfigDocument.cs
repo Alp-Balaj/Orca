@@ -39,6 +39,11 @@ public sealed record ConfigDocument
     public IReadOnlyList<string>? JudgeDiffExcludes { get; init; }
     public IReadOnlyDictionary<string, string>? Vaults { get; init; }
 
+    /// <summary>SUG-18: TUI presentation preferences — GLOBAL config only, like
+    /// <see cref="Vaults"/>: a theme is a machine/user preference, never a repo
+    /// property, so a committed orca.json must not carry it.</summary>
+    public TuiSection? Tui { get; init; }
+
     /// <summary>"warn" or "refuse" for what a <c>claude_code_version</c> mismatch against
     /// Orca's pinned/probed version does (SUG-15). Absent means "warn" — the non-breaking
     /// default an opinion-free config must keep getting.</summary>
@@ -143,4 +148,12 @@ public static class ConfigDocumentParser
 
         return document;
     }
+}
+
+/// <summary>SUG-18: the TUI preference block (global config only).</summary>
+public sealed record TuiSection
+{
+    /// <summary>One of the built-in theme names: dark (default), light, high-contrast,
+    /// terminal.</summary>
+    public string? Theme { get; init; }
 }

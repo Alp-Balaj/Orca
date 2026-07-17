@@ -453,4 +453,38 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Contains("empty allowedTools", e.Message);
         Assert.Contains("burns billed retries", e.Message);
     }
+
+    [Fact]
+    public void Tui_theme_is_global_only_and_validated()
+    {
+        // SUG-18: a theme is a machine/user preference — a committed orca.json must not
+        // impose one, and an unknown name refuses at load like every config error.
+        var global = WriteGlobalConfig($$"""
+            {
+              "schemaVersion": 1,
+              "vaults": { "brian-the-brain": {{System.Text.Json.JsonSerializer.Serialize(Path.Combine(_root, "vault"))}} },
+              "tui": { "theme": "light" }
+            }
+            """);
+        var repoPath = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] }
+            }
+            """);
+
+        Assert.Equal("light", ConfigLoader.Load(repoPath, global).TuiTheme);
+
+        var repoWithTui = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] },
+              "tui": { "theme": "dark" }
+            }
+            """);
+        var e = Assert.Throws<ConfigException>(() => ConfigLoader.Load(repoWithTui, global));
+        Assert.Contains("machine/user preference", e.Message);
+    }
 }

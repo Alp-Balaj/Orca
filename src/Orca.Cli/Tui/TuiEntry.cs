@@ -96,6 +96,8 @@ internal static class TuiEntry
         Application.Init();
         try
         {
+            // SUG-18: the theme is the global config's call, applied once at startup.
+            TuiTheme.Select(config.TuiTheme);
             // BF-17: every other screen disposes; the shell shouldn't be the exception.
             using var mainScreen = new MainScreen(report, Build, config, workspace);
             Application.Run(mainScreen);
