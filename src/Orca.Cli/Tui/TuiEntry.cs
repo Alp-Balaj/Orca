@@ -37,7 +37,7 @@ internal static class TuiEntry
     }
 
     /// <summary>The interactive entry both bare <c>orca</c> and <c>orca ui</c> route through on
-    /// a TTY (each caller has already confirmed interactivity). Opens the read-only TUI over the
+    /// a TTY (each caller has already confirmed interactivity). Opens the full-screen TUI (runs checkpoints and generates plans — quota-spending, a human at every gate) over the
     /// repo's status; but if the repo has no committed <c>orca.json</c> — the one refusal with a
     /// concrete next step — it OFFERS to scaffold one right here (plan orca-init, checkpoint 4;
     /// owner decision 2026-07-15: both entry points offer) instead of failing loud through the
@@ -78,7 +78,7 @@ internal static class TuiEntry
     private static bool Confirm() =>
         AnsiConsole.Prompt(new ConfirmationPrompt("No orca.json here — scaffold one now?") { DefaultValue = false });
 
-    /// <summary>Open the read-only TUI over the repo's current status. The caller has
+    /// <summary>Open the full-screen TUI (runs checkpoints and generates plans — quota-spending, a human at every gate) over the repo's current status. The caller has
     /// already confirmed the terminal is interactive (bare <c>orca</c> checks it before
     /// dispatch; <see cref="Launch"/> checks it for <c>orca ui</c>). The
     /// <see cref="StatusReport"/> is built before <c>Application.Init</c> — plain vault/git
