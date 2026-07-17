@@ -162,4 +162,28 @@ public sealed class GateRunnerTests : IDisposable
             $"gate should die on cancellation, not run out its 30s sleep (took {elapsed.Elapsed})");
         Assert.Contains("interrupted — process tree killed", File.ReadAllText(outputPath));
     }
+
+    [Fact]
+    public void A_gate_that_exits_but_leaves_a_child_holding_the_pipes_returns_after_the_drain_grace()
+    {
+        // BF-06 variant 1: `npm test`-style — exits 0, but a spawned watcher inherits
+        // stdout and holds it open. The old unconditional WaitForExit() hung forever.
+        if (OperatingSystem.IsWindows())
+            return; // the POSIX shape (inherited fd held by a backgrounded child) is the captured bug
+
+        var sh = Path.Combine(_dir, "lingering.sh");
+        File.WriteAllText(sh, "#!/bin/sh\nsleep 30 &\necho done\nexit 0\n");
+        File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var runner = new GateRunner(timeout: null, drainGrace: TimeSpan.FromMilliseconds(500));
+
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var result = runner.Run("tests", [sh], _dir, OutputPath("lingering"));
+        elapsed.Stop();
+
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(15),
+            $"the drain must be grace-bounded, not wait out the 30s child (took {elapsed.Elapsed})");
+        Assert.Equal(GateOutcome.Pass, result.Outcome);
+        Assert.Contains("done", result.OutputTail);
+        Assert.Contains("output truncated — a child process kept the pipes open", result.OutputTail);
+    }
 }

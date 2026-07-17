@@ -385,4 +385,55 @@ public class ClaudeCodeExecutorTests : IDisposable
             Directory.Delete(logDir, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task A_leftover_stderr_file_no_longer_loses_the_billed_result()
+    {
+        // BF-06 variant 3: FileMode.CreateNew inside the pump faulted on a leftover
+        // *.stderr.txt, nobody drained stderr, and the run surfaced as an IOException.
+        var paths = Paths(attempt: 60);
+        Directory.CreateDirectory(Path.GetDirectoryName(paths.Stderr)!);
+        File.WriteAllText(paths.Stderr, "leftover from a crash\n");
+
+        var options = Options() with
+        {
+            ClaudeExecutable = FakeCliReplaying("success.ndjson", 0),
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+
+        var result = await new ClaudeCodeExecutor().ExecuteAsync(options, paths);
+
+        Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
+        Assert.DoesNotContain("leftover", File.ReadAllText(paths.Stderr));
+    }
+
+    [Fact]
+    public async Task A_child_holding_the_pipes_after_exit_is_abandoned_with_a_truncation_note()
+    {
+        // BF-06 variant 2: EOF never comes while a descendant holds stdout/stderr.
+        if (OperatingSystem.IsWindows())
+            return; // the POSIX shape (inherited fd held by a backgrounded child) is the captured bug
+
+        var fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Transcripts", "success.ndjson");
+        var sh = Path.Combine(_dir, "fake-claude-lingering.sh");
+        File.WriteAllText(sh, $"#!/bin/sh\ncat \"{fixture}\"\nsleep 30 &\nexit 0\n");
+        File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        var paths = Paths(attempt: 61);
+        var options = Options() with
+        {
+            ClaudeExecutable = sh,
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        var result = await new ClaudeCodeExecutor(drainGrace: TimeSpan.FromMilliseconds(500))
+            .ExecuteAsync(options, paths);
+        elapsed.Stop();
+
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(15),
+            $"the drain must be grace-bounded (took {elapsed.Elapsed})");
+        Assert.Equal(InvocationStopReason.Succeeded, result.StopReason);
+        Assert.Contains("drain_truncated", File.ReadAllText(paths.EventLog));
+    }
 }

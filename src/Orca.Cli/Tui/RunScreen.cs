@@ -47,6 +47,7 @@ internal sealed class RunScreen : Window
     private RoleName? _currentRole;
     private bool _done;
     private bool _interrupting;
+    private bool _abandonOffered;
     private object? _drainToken;
 
     private RunScreen(CheckpointRunSession session, CheckpointRunPreview preview)
@@ -214,8 +215,19 @@ internal sealed class RunScreen : Window
                 return;
             }
 
-            // Quit is reachable only by interrupting first; swallow quit-ish keys. The
-            // activity pane still scrolls (its own keys are handled before this).
+            // BF-06: a hung drain (grandchild holding the pipes) used to leave the TUI
+            // permanently stuck behind the swallowed quit keys. Once the interrupt has
+            // visibly stalled, Ctrl-Q abandons the session — the child may keep running,
+            // and the footer says so.
+            if (_abandonOffered && key == Key.Q.WithCtrl)
+            {
+                key.Handled = true;
+                Application.RequestStop();
+                return;
+            }
+
+            // Quit is otherwise reachable only by interrupting first; swallow quit-ish
+            // keys. The activity pane still scrolls (its own keys are handled first).
             if (key == Key.Q || key == Key.Esc || key == Key.Q.WithCtrl)
                 key.Handled = true;
             return;
@@ -260,6 +272,19 @@ internal sealed class RunScreen : Window
 
         _interrupting = true;
         _cts.Cancel();
+
+        // BF-06: if the session hasn't resolved ~10s after the cancel (a gate or pump
+        // drain wedged on a surviving child), stop pretending — offer the abandon key.
+        Application.AddTimeout(TimeSpan.FromSeconds(10), () =>
+        {
+            if (!_done && _interrupting)
+            {
+                _abandonOffered = true;
+                UpdateFooter();
+            }
+
+            return false;
+        });
         _buffer.AppendLifecycle(
         [
             StyledLine.Empty,
@@ -319,9 +344,11 @@ internal sealed class RunScreen : Window
 
         runs.Add(_done
             ? new StyledRun("   ↑↓ scroll · enter/esc return to shell", TuiRole.Faint)
-            : _interrupting
-                ? new StyledRun("   interrupting…", TuiRole.Warning)
-                : new StyledRun("   ↑↓ scroll · ctrl-c interrupt", TuiRole.Faint));
+            : _abandonOffered
+                ? new StyledRun("   session not responding — ctrl-q abandon (child may keep running)", TuiRole.Error)
+                : _interrupting
+                    ? new StyledRun("   interrupting…", TuiRole.Warning)
+                    : new StyledRun("   ↑↓ scroll · ctrl-c interrupt", TuiRole.Faint));
         _footer.SetLines([new StyledLine(runs)]);
     }
 
