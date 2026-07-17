@@ -13,7 +13,7 @@ Orca is a workflow, not an autonomous agent. The full spec is `docs/kickoff-v2.m
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| Claude Code CLI | **2.1.201** | the stream-json event contract is derived empirically from committed transcript fixtures; a trait-gated contract test fails loudly on CLI breaking changes |
+| Claude Code CLI | **2.1.201** | the stream-json event contract is derived empirically from committed transcript fixtures; a trait-gated contract test fails loudly on CLI breaking changes, and since SUG-15 every invocation's observed `claude_code_version` is compared against this pin at runtime (warn by default, `claudeVersionPolicy: "refuse"` to block) — bump the pin only after the billed contract test passes on the new version |
 | .NET SDK | 10.0.301 | `net10.0`, nullable + implicit usings, warnings as errors, central package management |
 | Terminal.Gui | **2.4.17** | the TUI framework, `Orca.Cli` only (never `Orca.Core`); v2's API and driver model still move between minors, so pin here and upgrade deliberately — the same discipline as the CLI pin, with the shell kept thin so churn touches presentation only |
 
@@ -65,7 +65,7 @@ a human at every gate. Three parts:
   warning loudly when there is none, and re-opens an already-complete checkpoint. No
   more source-mode YAML edits in Obsidian — and no Properties-panel timestamp trap.
 - **Live pane** — press `x` to run the selected checkpoint: a preview modal authorizes the
-  spend, then all four roles (Planner/Implementer/Reconciler/Verifier) stream live as the
+  spend, then the checkpoint's three roles (Implementer/Reconciler/Verifier) stream live as the
   invocation runs, with scrollback (scroll up to pause tail-follow, End to resume) and an
   honest elided-event count under load — the run log on disk always has everything. Ctrl-C
   interrupts: it kills the invocation and leaves the attempt resumable, nothing re-paid. The
@@ -101,7 +101,7 @@ subcommand's output are unchanged.
     dotnet pack src/Orca.Cli -c Release
     dotnet tool install --global --add-source src/Orca.Cli/bin/Release orca.cli
 
-That puts `orca` on PATH. `orca --help` lists the four commands.
+That puts `orca` on PATH. `orca --help` lists every command.
 
 The packed version is derived from git at pack time: `1.0.<commit count>`, with a
 `-dirty` suffix when tracked files had uncommitted changes at pack time (so `1.0.11`, or
@@ -252,6 +252,8 @@ verdicts, the working-tree diffstat, and the decision prompt:
   message. Merging that branch into the base branch is *your* act, done however you
   like (local merge, PR). Afterwards, mark the checkpoint `complete` in the plan file.
 - **Reject** — optionally hard-reset the branch (asked explicitly, never automatic).
+  A human Reject exits **0** — it is a made decision, not a failure; script authors
+  should branch on the vault records, not the exit code, to distinguish outcomes.
   The verification findings are already in the vault and ride the next attempt's
   Implementer prompt; re-run `checkpoint-run` for attempt n+1 (capped by
   `maxCheckpointAttempts`).
@@ -321,6 +323,7 @@ record from machine facts alone and spends nothing on the LLM roles.
 
 ## Commands
 
+    orca init [--repo <path>]
     orca goal <plan-id> (--goal <text> | --goal-file <path>) [--dry-run] [--repo <path>]
     orca plan-init <plan-id> --title <title> [--base-branch main] [--repo <path>]
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
@@ -427,7 +430,7 @@ Every invocation is classified from observed evidence into a **stop reason** —
 recorded in the run log's `process_exit` event, in run state (`lastStopReason`), and
 per-attempt in planning state (`.orca/state/<plan-id>.planning.json`). Auth expiry,
 rate limiting, budget kills, and timeouts fail the attempt loudly and are **never
-retried automatically**: re-run later and attempt numbering resumes. All four roles
+retried automatically**: re-run later and attempt numbering resumes. All roles
 share one subscription window; only parse failures of a role's output file retry.
 
 `ui` opens the full-screen interactive TUI (see **Interactive TUI** above for the shell,
@@ -472,7 +475,7 @@ set, a gate crossing it has its process tree killed and records `fail`.
 
 ## Auth & secrets
 
-There are none to manage. All four roles (Planner, Implementer, Reconciler, Verifier) run
+There are none to manage. Every role (Planner, Implementer, Reconciler, Verifier) runs
 through `ClaudeCodeExecutor` and authenticate via the machine's interactive `claude`
 subscription login. No `ANTHROPIC_API_KEY`, no credential in any file in any repository —
 by owner decision (2026-07-06), after the step-4 capture proved `--bare` cannot

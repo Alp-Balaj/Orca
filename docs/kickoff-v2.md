@@ -91,7 +91,7 @@ orkestra/
   Orkestra.sln
   .gitignore               # bin/, obj/, .orkestra/
   src/
-    Orkestra.Core/         # domain types, vault I/O, executor wrapper, planning strategies, Anthropic client
+    Orkestra.Core/         # domain types, vault I/O, executor wrapper, planning strategies (no Anthropic API client — §2's locked choice)
     Orkestra.Cli/          # entry point, command parsing, terminal UX — thin, delegates to Core
   tests/
     Orkestra.Tests/
@@ -135,7 +135,8 @@ Orkestra touches three distinct roots. All three must be configurable, never har
 Configuration lives in an `orkestra.json` file at the target repo's root (per-project
 settings: vault plan directory, build command, test command, an allowed-tools list **per
 role** — Planner/Reconciler/Verifier get vault-write-only tools, Implementer gets its
-per-checkpoint allowlist (§7) — and a model ID per role) plus global defaults in the
+per-checkpoint allowlist (§7) — and an optional model ID per role, falling back to the
+CLI's own default when omitted) plus global defaults in the
 standard XDG/AppData location for the current OS. Model IDs, candidate count N for
 multi-candidate planning, `--max-turns`, wall-clock timeout, retry ceilings for the §5.4
 parse-retry loop, and cost ceilings all belong in this config — do not hardcode them.
@@ -190,8 +191,9 @@ plan's prose.
 ### 5.3 Run state and run logs
 
 Define a run-state record capturing what's needed to resume a run cold: plan id + version,
-current checkpoint index, Claude Code `session_id` (for within-checkpoint `--resume` only,
-per §8), branch name, prompt-file hashes in effect, accumulated cost, and timestamps. This
+current checkpoint index, Claude Code `session_id` (reserved for within-checkpoint
+`--resume` per §8 — recorded today, not yet fed back; the mechanism is aspirational),
+branch name, prompt-file hashes in effect, accumulated cost, and timestamps. This
 is the resumability contract — conceptually LangGraph's interrupt/resume model (persist
 state, allow a human to resume later), implemented as a plain JSON record, not a graph
 library.
@@ -213,9 +215,10 @@ Implementer (§6) but is never parsed for the result — only the vault file is,
 after the process exits.
 
 - **Planner** writes a plan file: YAML frontmatter per §5.1, plus free-form prose body.
-- **Reconciler** writes a small fixed YAML/JSON verdict block (implements-plan: yes/no/
-  partial, missing items, extra items) into the vault, adjacent to the plan per the vault
-  I/O conventions already used for verification records.
+- **Reconciler** writes a small fixed YAML/JSON verdict block (`implements_plan:
+  full|partial|none` — never yes/no, which YAML parses as booleans; plus missing items,
+  extra items) into the vault, adjacent to the plan per the vault I/O conventions
+  already used for verification records.
 - **Verifier** writes a small fixed YAML/JSON block (per-criterion pass/fail plus notes)
   into the verification record.
 
@@ -332,7 +335,9 @@ No hand-summarizing, no context rot by construction. Treat this as the single mo
 important architectural rule in the whole system — do not weaken it for convenience
 anywhere.
 
-**Scope of `--resume`:** permitted only *within* a single checkpoint — e.g. a continuation
+**Scope of `--resume`** (aspirational — permitted by this spec, not yet built; the
+session id is recorded per invocation and nothing feeds it back): permitted only
+*within* a single checkpoint — e.g. a continuation
 after a timeout, or a retry that benefits from the session's file-read context. Never use
 `--resume` across checkpoint boundaries; cross-checkpoint context flows through the vault
 only. Fresh session per checkpoint is the default; `--resume` is the exception and must be
