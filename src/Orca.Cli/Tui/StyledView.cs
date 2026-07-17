@@ -94,10 +94,14 @@ internal sealed class StyledView : View
             {
                 if (remaining <= 0)
                     break;
-                var text = run.Text.Length > remaining ? run.Text[..remaining] : run.Text;
+                // BF-15: clip by display columns on rune boundaries — code-unit slicing
+                // split surrogate pairs into replacement glyphs at line ends.
+                var text = TuiWidth.Columns(run.Text) > remaining
+                    ? TuiWidth.ClipToColumns(run.Text, remaining)
+                    : run.Text;
                 SetAttribute(TuiTheme.For(run.Role));
                 AddStr(text);
-                remaining -= text.Length;
+                remaining -= TuiWidth.Columns(text);
             }
         }
 

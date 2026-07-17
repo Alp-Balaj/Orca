@@ -160,8 +160,15 @@ public static class StreamEventDisplay
 
     private static string Clip(string text)
     {
+        // BF-15: cap by grapheme clusters, never code units — a code-unit slice could
+        // split a surrogate pair or a ZWJ emoji into replacement glyphs. (Core has no
+        // wcwidth; the cluster cap fixes the corruption, and the TUI's own column
+        // clipping handles exact display width.)
         var line = FirstLine(text);
-        return line.Length <= MaxTextLength ? line : line[..(MaxTextLength - 1)] + "…";
+        var info = new System.Globalization.StringInfo(line);
+        return info.LengthInTextElements <= MaxTextLength
+            ? line
+            : info.SubstringByTextElements(0, MaxTextLength - 1) + "…";
     }
 
     private static string FirstLine(string text)
