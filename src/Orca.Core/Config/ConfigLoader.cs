@@ -63,6 +63,7 @@ public static class ConfigLoader
         },
         DeniedTools = UnionDeniedTools(global.DeniedTools, repo.DeniedTools),
         Roles = MergeRoles(global.Roles, repo.Roles),
+        JudgeDiffExcludes = repo.JudgeDiffExcludes ?? global.JudgeDiffExcludes,
         Vaults = global.Vaults,
         ClaudeVersionPolicy = repo.ClaudeVersionPolicy ?? global.ClaudeVersionPolicy,
     };
@@ -163,6 +164,10 @@ public static class ConfigLoader
             throw new ConfigException(
                 $"deniedTools patterns must be non-empty; got a blank entry, after merging {repoPath} over {globalPath}");
 
+        if (merged.JudgeDiffExcludes?.Any(string.IsNullOrWhiteSpace) == true)
+            throw new ConfigException(
+                $"judgeDiffExcludes patterns must be non-empty; got a blank entry, after merging {repoPath} over {globalPath}");
+
         var roles = merged.Roles ?? new RolesSection();
         foreach (var (key, section) in EnumerateRoles(roles))
             ValidateRoleSection(key, section, repoPath, globalPath);
@@ -186,6 +191,7 @@ public static class ConfigLoader
             MaxPromptBytes = merged.MaxPromptBytes,
             PlanningCandidates = merged.Planning?.Candidates,
             DeniedTools = denied,
+            JudgeDiffExcludes = merged.JudgeDiffExcludes,
             RoleSections = roles,
             ClaudeVersionPolicy = claudeVersionPolicy,
         };

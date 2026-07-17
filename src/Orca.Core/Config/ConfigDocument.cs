@@ -31,6 +31,12 @@ public sealed record ConfigDocument
     /// prompt above it BEFORE anything is billed (the executor's 512 KiB stdin ceiling
     /// still backstops delivery; this one is a budget guard the human tunes).</summary>
     public int? MaxPromptBytes { get; init; }
+
+    /// <summary>SUG-12 §1: file patterns whose diff content is excluded from the JUDGE
+    /// prompts (replaced by explicit markers). Absent means JudgeDiff.DefaultExcludes;
+    /// an explicit empty list disables exclusion. Repo value replaces the global one
+    /// wholesale — exclusion lists don't union sensibly.</summary>
+    public IReadOnlyList<string>? JudgeDiffExcludes { get; init; }
     public IReadOnlyDictionary<string, string>? Vaults { get; init; }
 
     /// <summary>"warn" or "refuse" for what a <c>claude_code_version</c> mismatch against

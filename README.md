@@ -398,6 +398,13 @@ How much deliberation a plan deserves is your call — `--strategy` or an intera
 prompt, never auto-decided; multi-candidate is deferred until the implementer loop is
 proven, and choosing it refuses clearly. `--dry-run` is strictly zero-mutation.
 
+The judges read a filtered view of the diff (SUG-12): generated files
+(lockfiles, minified bundles — `judgeDiffExcludes` in the config, with sensible
+defaults; an explicit `[]` disables it) are replaced by explicit "the file DID change"
+markers, and any single file's section is capped at 64 KiB — the Reconciler and
+Verifier each pay the diff's input tokens, and nobody needs a judge to read 4,000
+lines of package-lock.json. The human's own gate review always shows the real diff.
+
 Every invocation is classified from observed evidence into a **stop reason** —
 `succeeded | auth_failed | rate_limited | budget_exceeded | timed_out | failed` —
 recorded in the run log's `process_exit` event, in run state (`lastStopReason`), and

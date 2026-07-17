@@ -148,7 +148,10 @@ public sealed class CheckpointVerifier(
         // Orca — not the Reconciler/Verifier — must guarantee `.staging` exists first.
         Directory.CreateDirectory(_layout.StagingDirectory(plan.PlanId));
 
-        var diff = workspace.FullDiff();
+        // SUG-12: the judges get the filtered view — generated files as markers, any
+        // single file's section capped. The human's own gate review keeps the real diff.
+        var diff = JudgeDiff.Filter(
+            workspace.FullDiff(), config.JudgeDiffExcludes ?? JudgeDiff.DefaultExcludes);
         var childNotePath = _layout.ChildNoteFile(plan.PlanId, checkpoint.Id);
         var childNote = File.Exists(childNotePath) ? reader.ReadChildNote(plan, checkpoint.Id) : null;
         var planSection = CheckpointPrompt.SpecSections(checkpoint, childNote);
