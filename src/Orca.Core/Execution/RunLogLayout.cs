@@ -109,6 +109,32 @@ public sealed class RunLogLayout
 
     /// <summary>Combined stdout+stderr capture of one deterministic gate command —
     /// <c>&lt;checkpoint-id&gt;.attempt-&lt;n&gt;.build.txt</c> / <c>….tests.txt</c>.</summary>
+    /// <summary>Log paths for one Interviewer invocation (SUG-08) — same directory,
+    /// <c>goal</c> stem.</summary>
+    public RunLogPaths GoalAttemptPaths(string planId, int attempt)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+
+        var stem = $"goal.attempt-{attempt}";
+        return new RunLogPaths
+        {
+            EventLog = Path.Combine(RunsRoot, planId, stem + ".ndjson"),
+            Stderr = Path.Combine(RunsRoot, planId, stem + ".stderr.txt"),
+        };
+    }
+
+    /// <summary>The <c>--settings</c> evidence file for one Interviewer invocation.</summary>
+    public string GoalSettingsFile(string planId, int attempt)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        if (attempt < 1)
+            throw new ArgumentOutOfRangeException(nameof(attempt), attempt, "attempt must be >= 1");
+
+        return Path.Combine(RunsRoot, planId, $"goal.attempt-{attempt}.settings.json");
+    }
+
     public string GateOutputFile(string planId, string checkpointId, int attempt, string gate)
     {
         if (gate is not ("build" or "tests"))

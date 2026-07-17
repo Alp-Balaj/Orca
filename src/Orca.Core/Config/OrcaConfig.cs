@@ -11,6 +11,9 @@ public enum RoleName
     /// <summary>SUG-01: the read-only repo auditor that grounds the Planner. Optional —
     /// a repo without <c>roles.scout</c> plans goal-only, exactly as before.</summary>
     Scout,
+    /// <summary>SUG-08: the goal-refinement interviewer behind <c>orca goal</c>.
+    /// Optional — a repo without <c>roles.interviewer</c> just can't run that command.</summary>
+    Interviewer,
 }
 
 /// <summary>The merged, resolved configuration one run works from: target-repo
@@ -79,6 +82,7 @@ public sealed record OrcaConfig
             RoleName.Reconciler => RoleSections.Reconciler,
             RoleName.Verifier => RoleSections.Verifier,
             RoleName.Scout => RoleSections.Scout,
+            RoleName.Interviewer => RoleSections.Interviewer,
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
         };
 
@@ -116,6 +120,7 @@ public sealed record OrcaConfig
         RoleName.Reconciler => "reconciler",
         RoleName.Verifier => "verifier",
         RoleName.Scout => "scout",
+        RoleName.Interviewer => "interviewer",
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
     };
 }

@@ -40,6 +40,10 @@ public sealed class VaultLayout
     /// <summary>SUG-01: the Scout's repository audit, next to the plan file it grounds.</summary>
     public string AuditFile(string planId) =>
         Path.Combine(PlanDirectory(planId), ValidatePlanId(planId) + ".audit.md");
+    /// <summary>SUG-08: the Interviewer's refined goal brief, next to the plan file it
+    /// will seed.</summary>
+    public string GoalFile(string planId) =>
+        Path.Combine(PlanDirectory(planId), ValidatePlanId(planId) + ".goal.md");
 
     public string ChildNoteFile(string planId, string checkpointId) =>
         Path.Combine(PlanDirectory(planId), ValidateCheckpointId(checkpointId) + ".md");
