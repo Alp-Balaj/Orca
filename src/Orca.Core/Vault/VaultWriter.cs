@@ -30,6 +30,29 @@ public sealed class VaultWriter(VaultLayout layout)
         return path;
     }
 
+    /// <summary>SUG-11 §4: persists the human's one-line rejection reason as an
+    /// append-only note next to the records it overrules, so the next attempt's prompt
+    /// can carry it. Same atomic, never-overwrite discipline as the record writers; the
+    /// content is the human's words plus minimal provenance, no schema to validate.</summary>
+    public string WriteRejectionNote(
+        string planId, string checkpointId, int attempt, string note, DateTimeOffset timestamp)
+    {
+        if (string.IsNullOrWhiteSpace(note))
+            throw new ArgumentException("rejection note must not be empty", nameof(note));
+
+        var path = layout.RejectionFile(planId, checkpointId, attempt);
+        var text =
+            "---\n" +
+            $"plan_id: {planId}\n" +
+            $"checkpoint_id: {checkpointId}\n" +
+            $"attempt: {attempt}\n" +
+            $"timestamp: {timestamp.ToUniversalTime():yyyy-MM-ddTHH:mm:ss}Z\n" +
+            "---\n\n" +
+            note.ReplaceLineEndings("\n").TrimEnd() + "\n";
+        WriteRecord(path, layout.RejectionDirectory(planId), text, "rejection note");
+        return path;
+    }
+
     private static void WriteRecord(string path, string directory, string text, string kind)
     {
         if (File.Exists(path))

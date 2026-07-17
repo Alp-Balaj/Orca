@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using Orca.Core.Domain;
+using Orca.Core.Run;
 
 namespace Orca.Core.Vault;
 
@@ -55,6 +57,46 @@ public sealed class VaultReader(VaultLayout layout)
 
         return [.. records.OrderBy(r => r.Attempt)];
     }
+
+    /// <summary>The latest human rejection note for a checkpoint (SUG-11 §4), or null
+    /// when none exists. Latest by the attempt number in the filename — the same
+    /// append-only naming the record kinds use. The body (everything after the
+    /// frontmatter) is the human's own words, carried verbatim into the next prompt.</summary>
+    public HumanRejection? ReadLatestRejection(string planId, string checkpointId)
+    {
+        VaultLayout.ValidatePlanId(planId);
+        VaultLayout.ValidateCheckpointId(checkpointId);
+
+        var directory = layout.RejectionDirectory(planId);
+        if (!Directory.Exists(directory))
+            return null;
+
+        HumanRejection? latest = null;
+        foreach (var file in Directory.EnumerateFiles(directory, $"{checkpointId}.attempt-*.md"))
+        {
+            var match = RejectionAttemptSuffix.Match(Path.GetFileName(file));
+            if (!match.Success)
+                continue;
+            var attempt = int.Parse(match.Groups["attempt"].Value);
+            if (latest is not null && attempt <= latest.Attempt)
+                continue;
+
+            var text = File.ReadAllText(file).ReplaceLineEndings("\n");
+            var frontmatterEnd = text.IndexOf("\n---\n", StringComparison.Ordinal);
+            if (!text.StartsWith("---\n", StringComparison.Ordinal) || frontmatterEnd < 0)
+                throw new VaultSchemaException(file, "rejection note is missing its frontmatter delimiters");
+            var note = text[(frontmatterEnd + 5)..].Trim();
+            if (note.Length == 0)
+                throw new VaultSchemaException(file, "rejection note has no body");
+
+            latest = new HumanRejection(attempt, note);
+        }
+
+        return latest;
+    }
+
+    private static readonly Regex RejectionAttemptSuffix =
+        new(@"\.attempt-(?<attempt>[1-9]\d*)\.md$", RegexOptions.Compiled);
 
     /// <summary>One past the highest attempt evidenced by either record kind — see
     /// <see cref="VaultAttempts"/>.</summary>

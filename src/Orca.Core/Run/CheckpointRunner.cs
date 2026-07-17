@@ -136,12 +136,18 @@ public sealed class CheckpointRunner(
         // not yet committed) is the ordinary resume path, not forgotten evidence, so it is
         // exempt here. Refuse before anything spends so the human fixes the plan file (or
         // explicitly overrides) instead of paying for a redundant attempt.
+        var latestRejection = reader.ReadLatestRejection(plan.PlanId, checkpoint.Id);
         if (checkpoint.Status == CheckpointStatus.Pending && !overrideCompleteByEvidence && !pendingDecision)
         {
             var approvalCommitAtHead = branchExists
                 && IsApprovalCommit(workspace.CommitSubject(branch), plan.PlanId, checkpoint.Id);
+            // A passing record whose attempt the human explicitly rejected (SUG-11 §4's
+            // note proves it was deliberate, not a forgotten status flip) is not
+            // "complete by evidence" — it's the reject-on-diff-review retry path, and
+            // refusing here would demand an override for the workflow's own outcome.
             var latestVerificationPasses =
-                verifications.Count > 0 && verifications[^1].Verdict == VerificationVerdict.Pass;
+                verifications.Count > 0 && verifications[^1].Verdict == VerificationVerdict.Pass
+                && latestRejection?.Attempt != verifications[^1].Attempt;
 
             if (approvalCommitAtHead || latestVerificationPasses)
             {
@@ -200,9 +206,12 @@ public sealed class CheckpointRunner(
         {
             Verification = verifications.Count > 0 ? verifications[^1] : null,
             Reconciliation = reconciliations.Count > 0 ? reconciliations[^1] : null,
+            Rejection = latestRejection,
         };
 
-        var prompt = CheckpointPrompt.Assemble(plan, checkpoint, childNote, feedback.IsEmpty ? null : feedback);
+        var prompt = CheckpointPrompt.Assemble(
+            plan, checkpoint, childNote, feedback.IsEmpty ? null : feedback,
+            new GateCommands(config.BuildCommand, config.TestCommand), attempt);
         var role = config.GetRole(RoleName.Implementer);
         var settingsJson = config.DeniedTools.Count > 0 ? PermissionSettings.ToJson(config.DeniedTools) : null;
 

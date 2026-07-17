@@ -282,6 +282,24 @@ public sealed class CheckpointRunSession(
 
             case CheckpointChoice.Reject:
                 _runner.Reject(decision.DiscardChanges);
+
+                // SUG-11 §4: persist the human's reason (when they gave one) next to the
+                // records it overrules, so the next attempt's prompt carries it. After
+                // Reject succeeds — a note for a rejection that didn't land would lie.
+                // The decided attempt: the verification record's own number when one
+                // exists, else the attempt just run (fresh) or resumed (preview - 1).
+                if (!string.IsNullOrWhiteSpace(decision.RejectionNote))
+                {
+                    var decidedAttempt = verification?.Record?.Attempt
+                        ?? (run is not null ? preview.Attempt : preview.Attempt - 1);
+                    if (decidedAttempt >= 1)
+                    {
+                        new VaultWriter(_layout).WriteRejectionNote(
+                            preview.Plan.PlanId, preview.Checkpoint.Id, decidedAttempt,
+                            decision.RejectionNote.Trim(), _clock.GetUtcNow());
+                    }
+                }
+
                 return new CheckpointSessionResult
                 {
                     Outcome = CheckpointSessionOutcome.Rejected,
