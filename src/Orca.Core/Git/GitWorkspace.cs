@@ -192,6 +192,19 @@ public sealed class GitWorkspace
             $"git merge-base --is-ancestor {ancestor} {descendant} exited {result.ExitCode}: {result.Stderr.Trim()}");
     }
 
+    /// <summary>True when git itself would ignore <paramref name="relativePath"/>
+    /// (<c>git check-ignore -q</c>) — the authoritative answer, unlike any textual scan
+    /// of .gitignore (SUG-10 / the BF-17 paper cut).</summary>
+    public bool IsPathIgnored(string relativePath)
+    {
+        var result = GitProcess.Run(
+            RepoRoot, ["check-ignore", "-q", "--", relativePath], allowNonZero: true);
+        if (result.ExitCode is 0 or 1)
+            return result.ExitCode == 0;
+        throw new GitException(
+            $"git check-ignore {relativePath} exited {result.ExitCode}: {result.Stderr.Trim()}");
+    }
+
     /// <summary>Fast-forwards <paramref name="baseBranch"/> to <paramref name="branch"/> —
     /// the only merge shape chaining performs (SUG-16), and only once the human has
     /// confirmed "run next now?" after an Approve. False (no exception) when the base

@@ -23,6 +23,8 @@ app.Configure(config =>
         .WithDescription("Approve a draft plan (status: draft → approved) via the surgical frontmatter editor — no source-mode YAML edit.");
     config.AddCommand<CheckpointCompleteCommand>("checkpoint-complete")
         .WithDescription("Mark a checkpoint complete (evidence-guarded) or re-open it with --reopen — no source-mode YAML edit.");
+    config.AddCommand<DoctorCommand>("doctor")
+        .WithDescription("Zero-cost preflight: environment, config/vault integrity, and repo\u2194vault drift checks — pass/warn/fail, exit 0/1.");
     config.AddCommand<StatusCommand>("status")
         .WithDescription("Show the plan's checkpoints and the current run state.");
     config.AddCommand<UiCommand>("ui")
