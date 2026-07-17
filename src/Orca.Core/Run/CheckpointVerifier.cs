@@ -124,12 +124,12 @@ public sealed class CheckpointVerifier(
         cancellationToken.ThrowIfCancellationRequested();
         observer?.OnRunEvent(new RunObservation.GateStarted("build", config.BuildCommand));
         var build = gateRunner.Run("build", config.BuildCommand, workspace.RepoRoot,
-            _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "build"), cancellationToken);
+            NextFreeGateOutput(plan.PlanId, checkpoint.Id, attempt, "build"), cancellationToken);
         observer?.OnRunEvent(new RunObservation.GateFinished(build));
         cancellationToken.ThrowIfCancellationRequested();
         observer?.OnRunEvent(new RunObservation.GateStarted("tests", config.TestCommand));
         var tests = gateRunner.Run("tests", config.TestCommand, workspace.RepoRoot,
-            _logLayout.GateOutputFile(plan.PlanId, checkpoint.Id, attempt, "tests"), cancellationToken);
+            NextFreeGateOutput(plan.PlanId, checkpoint.Id, attempt, "tests"), cancellationToken);
         observer?.OnRunEvent(new RunObservation.GateFinished(tests));
         cancellationToken.ThrowIfCancellationRequested();
         baseline = baseline with { BuildGate = build, TestsGate = tests };
@@ -413,6 +413,23 @@ public sealed class CheckpointVerifier(
 
     private string VaultRelative(string path) =>
         Path.GetRelativePath(config.VaultRoot, path).Replace('\\', '/');
+
+    /// <summary>BF-17: gate outputs are append-only evidence like every other log —
+    /// a resume used to overwrite the previous run's output at the same path. The first
+    /// run keeps the plain name; re-runs get -2, -3, … suffixes.</summary>
+    private string NextFreeGateOutput(string planId, string checkpointId, int attempt, string gate)
+    {
+        var path = _logLayout.GateOutputFile(planId, checkpointId, attempt, gate);
+        if (!File.Exists(path))
+            return path;
+        var n = 2;
+        while (File.Exists(WithSuffix(path, n)))
+            n++;
+        return WithSuffix(path, n);
+
+        static string WithSuffix(string basePath, int n) =>
+            basePath[..^4] + $"-{n}.txt";
+    }
 
     private static CheckpointVerificationOutcome Failed(
         CheckpointVerificationOutcome baseline, RoleFailure failure) => baseline with

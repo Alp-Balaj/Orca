@@ -96,7 +96,9 @@ internal static class TuiEntry
         Application.Init();
         try
         {
-            Application.Run(new MainScreen(report, Build, config, workspace));
+            // BF-17: every other screen disposes; the shell shouldn't be the exception.
+            using var mainScreen = new MainScreen(report, Build, config, workspace);
+            Application.Run(mainScreen);
         }
         finally
         {

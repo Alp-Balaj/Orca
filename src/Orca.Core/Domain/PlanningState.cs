@@ -84,7 +84,14 @@ public static class PlanningStateSerializer
 
     public static string ToJson(PlanningState state) => JsonSerializer.Serialize(state, Options);
 
-    public static PlanningState FromJson(string json) =>
-        JsonSerializer.Deserialize<PlanningState>(json, Options)
-        ?? throw new JsonException("planning state JSON deserialized to null");
+    public static PlanningState FromJson(string json)
+    {
+        var state = JsonSerializer.Deserialize<PlanningState>(json, Options)
+            ?? throw new JsonException("planning state JSON deserialized to null");
+        // BF-17: the version was written but never checked on read.
+        if (state.SchemaVersion != 1)
+            throw new JsonException(
+                $"unsupported planning-state schemaVersion {state.SchemaVersion}; this build of Orca supports version 1");
+        return state;
+    }
 }

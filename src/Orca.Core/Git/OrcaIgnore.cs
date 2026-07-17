@@ -14,9 +14,20 @@ public static class OrcaIgnore
     /// base branch on its own).</summary>
     public static bool EnsureIgnored(string repoRoot)
     {
+        // BF-17: ask git itself (check-ignore), not the root .gitignore's text — a
+        // global ignore or info/exclude made the textual check append pointlessly, and
+        // a later `!.orca/` negation passed the text check while git did NOT ignore,
+        // which would have committed run logs on the next approve. Appending after a
+        // negation works because the last matching gitignore rule wins.
+        var check = GitProcess.Run(repoRoot, ["check-ignore", "-q", "--", ".orca/"], allowNonZero: true);
+        if (check.ExitCode == 0)
+            return false;
+
         var path = Path.Combine(repoRoot, ".gitignore");
-        if (File.Exists(path))
+        if (check.ExitCode != 1 && File.Exists(path))
         {
+            // git couldn't answer (not a work tree — some tests, odd states): the old
+            // textual check is the honest fallback.
             var ignored = File.ReadAllLines(path)
                 .Select(line => line.Trim())
                 .Any(line => line is ".orca" or ".orca/" or "/.orca" or "/.orca/");

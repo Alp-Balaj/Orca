@@ -65,6 +65,10 @@ internal static class CheckpointRenderer
         // invocation result renders — with resets-at when the CLI offered one.
         if (e.LastRateLimit is { } rl && !InvocationStopReasons.IsBenignRateLimitStatus(rl.Status))
             table.AddRow("rate limit", $"status '{rl.Status.EscapeMarkup()}'{rl.ResetsAtText.EscapeMarkup()}");
+        // BF-17: on failure, name the captured stderr — it existed all along and no
+        // message ever pointed at it.
+        if (e.StopReason != InvocationStopReason.Succeeded)
+            table.AddRow("stderr", outcome.Preview.LogPaths.Stderr.EscapeMarkup());
         table.AddRow("session", (e.SessionId ?? "(none)").EscapeMarkup());
         table.AddRow("accumulated cost", $"${outcome.RunState.AccumulatedCostUsd}");
         AnsiConsole.Write(new Panel(table).Header("invocation result"));

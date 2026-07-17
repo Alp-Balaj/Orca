@@ -41,7 +41,9 @@ internal static class TuiModal
         {
             foreach (var choice in choices)
             {
-                if (key == choice.Key)
+                // BF-17: Caps-Lock or a habitual shifted letter must still match — a
+                // gate modal that ignores 'Y' looks dead.
+                if (key == choice.Key || key == choice.Key.WithShift)
                 {
                     result = choice.Result;
                     key.Handled = true;

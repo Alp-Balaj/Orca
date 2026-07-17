@@ -59,4 +59,19 @@ public sealed class OrcaIgnoreTests : IDisposable
         Assert.False(OrcaIgnore.EnsureIgnored(_root));
         Assert.Equal(before, File.ReadAllText(GitignorePath));
     }
+
+    [Fact]
+    public void A_negated_entry_is_seen_through_because_git_itself_is_asked()
+    {
+        // BF-17: ".orca/" followed by "!.orca/" passed the old textual check while git
+        // did NOT ignore — approve's git add -A would have committed run logs. The
+        // appended entry wins because the last matching gitignore rule wins.
+        using var repo = new TempGitRepo();
+        File.WriteAllText(Path.Combine(repo.Root, ".gitignore"), ".orca/\n!.orca/\n");
+
+        Assert.True(OrcaIgnore.EnsureIgnored(repo.Root));
+
+        var check = repo.Git("check-ignore", "-q", "--", ".orca/");
+        Assert.Equal("", check.Trim()); // exit 0 = ignored now (Git throws on nonzero)
+    }
 }
