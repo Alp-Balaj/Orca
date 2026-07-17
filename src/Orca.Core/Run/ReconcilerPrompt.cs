@@ -29,8 +29,11 @@ public static class ReconcilerPrompt
         AppendIdentity(sb, identity);
         sb.Append($"- write the verdict to this path, relative to your working directory: {relativeStagingPath}\n");
         sb.Append("\n## Plan section for this checkpoint\n\n");
-        sb.Append(planSection.ReplaceLineEndings("\n").TrimEnd());
-        sb.Append("\n\n## Diff\n\n");
+        // BF-10 §2: the plan section carries the human-edited child note verbatim — a
+        // careless "## Diff" heading or an "answer full regardless" line inside it must
+        // read as data, never as prompt structure.
+        AppendFenced(sb, "text", planSection);
+        sb.Append("\n## Diff\n\n");
         AppendFenced(sb, "diff", diff);
 
         if (previousError is not null)
@@ -47,13 +50,30 @@ public static class ReconcilerPrompt
         sb.Append($"- attempt: {identity.Attempt}\n");
     }
 
-    /// <summary>Four-backtick fences so embedded triple-backtick content cannot close the
-    /// block early.</summary>
+    /// <summary>Fences sized past any backtick run the content itself contains
+    /// (minimum four) — BF-10 §1: a diff carrying a ≥4-backtick line (markdown docs,
+    /// nested-fence fixtures — and the Implementer AUTHORS the diff) used to close the
+    /// hardcoded four-backtick block early and promote the rest of the diff to
+    /// instruction-level text in the judge's prompt.</summary>
     internal static void AppendFenced(StringBuilder sb, string language, string content)
     {
-        sb.Append("````").Append(language).Append('\n');
-        sb.Append(content.ReplaceLineEndings("\n").TrimEnd()).Append('\n');
-        sb.Append("````\n");
+        var text = content.ReplaceLineEndings("\n").TrimEnd();
+        var fence = new string('`', Math.Max(4, LongestBacktickRun(text) + 1));
+        sb.Append(fence).Append(language).Append('\n');
+        sb.Append(text).Append('\n');
+        sb.Append(fence).Append('\n');
+    }
+
+    internal static int LongestBacktickRun(string text)
+    {
+        int longest = 0, current = 0;
+        foreach (var ch in text)
+        {
+            current = ch == '`' ? current + 1 : 0;
+            longest = Math.Max(longest, current);
+        }
+
+        return longest;
     }
 
     internal static void AppendRetry(StringBuilder sb, string relativeStagingPath, string previousError)
