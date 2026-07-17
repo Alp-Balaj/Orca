@@ -252,6 +252,12 @@ internal sealed class RunScreen : Window
         if (!confirmed)
             return;
 
+        // BF-05 polish: the run can finish while the confirm modal is open — appending
+        // "interrupting…" after the outcome summary would claim an interrupt that never
+        // happened.
+        if (_done)
+            return;
+
         _interrupting = true;
         _cts.Cancel();
         _buffer.AppendLifecycle(

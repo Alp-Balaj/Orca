@@ -123,6 +123,13 @@ internal sealed class TuiCheckpointGate(Action flushPending) : ICheckpointGate
 
         Application.Invoke(() =>
         {
+            // BF-05: if cancellation already resolved the TCS (Ctrl-C confirmed while
+            // the gates ran), the queued modal must never open — a "ghost" modal whose
+            // answer lands in a completed TCS silently discards the human's decision
+            // while they believe they approved.
+            if (tcs.Task.IsCompleted)
+                return;
+
             try
             {
                 flushPending();

@@ -350,4 +350,39 @@ public class ClaudeCodeExecutorTests : IDisposable
 
         Assert.Contains("refusing to overwrite", e.Message);
     }
+
+    [Fact]
+    public async Task A_pre_cancelled_token_never_spawns_claude_or_consumes_a_run_log_slot()
+    {
+        // BF-05: spawning just to kill burned a process launch and permanently consumed
+        // an append-only run-log invocation slot.
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var logDir = Directory.CreateTempSubdirectory("orca-precancel-").FullName;
+        try
+        {
+            var paths = new RunLogPaths
+            {
+                EventLog = Path.Combine(logDir, "events.ndjson"),
+                Stderr = Path.Combine(logDir, "stderr.txt"),
+            };
+            var options = new ClaudeInvocationOptions
+            {
+                Prompt = "hi",
+                WorkingDirectory = logDir,
+                AllowedTools = ["Read"],
+                MaxTurns = 1,
+                Timeout = TimeSpan.FromSeconds(5),
+            };
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new ClaudeCodeExecutor().ExecuteAsync(options, paths, cancellationToken: cts.Token));
+
+            Assert.False(File.Exists(paths.EventLog));
+        }
+        finally
+        {
+            Directory.Delete(logDir, recursive: true);
+        }
+    }
 }
