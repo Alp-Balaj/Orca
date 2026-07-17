@@ -85,10 +85,28 @@ public sealed class SingleCandidatePlanningStrategyTests : IDisposable
     private SingleCandidatePlanningStrategy Strategy(FakePlannerExecutor executor, int? maxParseRetries = 1) =>
         new(Config(maxParseRetries), executor, _repo);
 
-    private void WritePlanFile(string text)
+    private const string ChildNoteText = """
+        ---
+        schema_version: 1
+        plan_id: recipe-tagging
+        checkpoint_id: 01-tag-entity
+        ---
+
+        Approach: add the Tag entity. Not this session: the list view.
+        """;
+
+    /// <summary>Writes the plan file plus checkpoint 01's child note — the Planner's
+    /// contract-v2 deliverable (SUG-04). Tests pinning child-note failures pass
+    /// <paramref name="withChildNote"/> false.</summary>
+    private void WritePlanFile(string text, bool withChildNote = true)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(PlanPath)!);
         File.WriteAllText(PlanPath, text);
+        var childPath = Path.Combine(Path.GetDirectoryName(PlanPath)!, "01-tag-entity.md");
+        if (withChildNote)
+            File.WriteAllText(childPath, ChildNoteText);
+        else if (File.Exists(childPath))
+            File.Delete(childPath);
     }
 
     [Fact]
@@ -391,5 +409,68 @@ public sealed class SingleCandidatePlanningStrategyTests : IDisposable
             },
             ResultText = text,
         };
+    }
+
+    [Fact]
+    public async Task A_missing_child_note_is_a_parse_failure_that_feeds_the_retry()
+    {
+        // SUG-04 contract v2: every checkpoint ships its brief; a plan spine without one
+        // re-enters the §5.4 loop with the exact expectation in the error.
+        var executor = new FakePlannerExecutor();
+        executor.Enqueue(FakePlannerExecutor.Success, () => WritePlanFile(ValidPlanText(), withChildNote: false));
+        executor.Enqueue(FakePlannerExecutor.Success, () => WritePlanFile(ValidPlanText()));
+        var strategy = Strategy(executor);
+
+        var outcome = await strategy.GenerateAsync(strategy.Prepare(Request()));
+
+        Assert.Equal(PlanningRunStatus.Succeeded, outcome.State.Status);
+        Assert.Equal(2, executor.Invocations.Count);
+        Assert.Contains("wrote no child note for checkpoint '01-tag-entity'",
+            outcome.State.Attempts[0].ParseFailure);
+        Assert.Contains("wrote no child note", executor.Invocations[1].Options.Prompt);
+    }
+
+    [Fact]
+    public async Task An_empty_child_note_body_is_rejected()
+    {
+        var executor = new FakePlannerExecutor();
+        executor.Enqueue(FakePlannerExecutor.Success, () =>
+        {
+            WritePlanFile(ValidPlanText(), withChildNote: false);
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(PlanPath)!, "01-tag-entity.md"),
+                "---\nschema_version: 1\nplan_id: recipe-tagging\ncheckpoint_id: 01-tag-entity\n---\n\n");
+        });
+        var strategy = Strategy(executor, maxParseRetries: 0);
+
+        var outcome = await strategy.GenerateAsync(strategy.Prepare(Request()));
+
+        Assert.Equal(PlanningRunStatus.Failed, outcome.State.Status);
+        Assert.Contains("empty brief is no brief", outcome.FailureDetail);
+    }
+
+    [Fact]
+    public async Task A_child_note_naming_the_wrong_plan_is_rejected()
+    {
+        var executor = new FakePlannerExecutor();
+        executor.Enqueue(FakePlannerExecutor.Success, () =>
+        {
+            WritePlanFile(ValidPlanText(), withChildNote: false);
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(PlanPath)!, "01-tag-entity.md"),
+                "---\nschema_version: 1\nplan_id: other-plan\ncheckpoint_id: 01-tag-entity\n---\n\nBrief.\n");
+        });
+        var strategy = Strategy(executor, maxParseRetries: 0);
+
+        var outcome = await strategy.GenerateAsync(strategy.Prepare(Request()));
+
+        Assert.Equal(PlanningRunStatus.Failed, outcome.State.Status);
+        Assert.Contains("names plan 'other-plan'", outcome.FailureDetail);
+    }
+
+    [Fact]
+    public void The_role_prompt_contracts_one_child_note_per_checkpoint()
+    {
+        Assert.Contains("exactly one child note per checkpoint", PlannerPrompt.RoleText);
+        Assert.Contains("checkpoint_id:", PlannerPrompt.RoleText);
+        Assert.Contains("Scope fences", PlannerPrompt.RoleText);
     }
 }
