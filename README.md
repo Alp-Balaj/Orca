@@ -245,7 +245,13 @@ verdicts, the working-tree diffstat, and the decision prompt:
 **4. Check where things stand** any time: `orca status --repo <repo>` — plan,
 checkpoints, latest verification verdict, accumulated cost.
 
-Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its own.
+Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its own —
+but after an Approve it collapses the gap to one keypress: if the plan still has a
+pending checkpoint, the same session offers **"next: `<id>` — run it now?"** (CLI prompt
+and TUI modal alike). Confirming fast-forwards the base branch to the just-approved
+checkpoint branch and launches the next attempt right there; declining, or any
+non-approve outcome, ends the session as before. Chaining automates *launching*, never
+*deciding* — every checkpoint still stops at its own gate.
 
 ### Resuming and failures
 
@@ -280,8 +286,10 @@ record from machine facts alone and spends nothing on the LLM roles.
 invocation — then verifies it and stops at an Approve / Reject / Defer prompt. Approve
 commits with a structured message; Reject *offers* a hard reset (never automatic); Defer
 leaves the decision, and the next `checkpoint-run` resumes it instead of paying for a new
-invocation. `--dry-run` prints the branch, assembled prompt, and exact argv without
-mutating anything.
+invocation. After an Approve, the session offers the plan's next pending checkpoint
+("run it now?") — confirming fast-forwards the base branch and runs it in the same
+session, one gate per checkpoint as always. `--dry-run` prints the branch, assembled
+prompt, and exact argv without mutating anything.
 
 **Verification runs automatically after the Implementer** (spec §8, built in step 7),
 in a fixed order: deterministic gates first — `commands.build` then `commands.test` as
