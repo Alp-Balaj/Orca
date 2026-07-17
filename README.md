@@ -404,8 +404,16 @@ Planner can never self-approve.) Every produced file is parsed fail-loud — the
 the real plan parser, each child note by the child-note parser; any failure feeds a
 capped Reflexion-style retry (`maxParseRetries`) whose prompt quotes the exact error.
 How much deliberation a plan deserves is your call — `--strategy` or an interactive
-prompt, never auto-decided; multi-candidate is deferred until the implementer loop is
-proven, and choosing it refuses clearly. `--dry-run` is strictly zero-mutation.
+prompt, never auto-decided. `--strategy multi` (SUG-13) runs the deliberation path for
+architecturally significant goals: N candidate Planner invocations (`planning.candidates`
+in the config, default 3) under genuinely different framings (simplest-possible /
+most-testable / most-extensible — diversity from framing, never from sampling), run
+concurrently; a Critic scores them into a durable `.staging/critique.md` verdict
+(reviewable evidence, like everything else); a synthesis pass builds the final draft
+from the winner, absorbing what the runners-up got right, with the
+`candidates/selected/rationale` provenance block pinned to the critic's verdict. Costs
+~N+2× a single planning run — worth it exactly on the rare decisions that deserve it.
+`--dry-run` is strictly zero-mutation (it previews candidate 1's prompt).
 
 The judges read a filtered view of the diff (SUG-12): generated files
 (lockfiles, minified bundles — `judgeDiffExcludes` in the config, with sensible

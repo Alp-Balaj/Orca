@@ -81,19 +81,20 @@ public sealed class NonInteractiveCliTests
     [Fact]
     public void Plan_generate_refuses_up_front_without_a_strategy_on_a_non_interactive_terminal()
     {
-        Assert.False(PlanGenerateCommand.RouteStrategyToHuman(strategyFlag: null, interactive: false));
+        Assert.Null(PlanGenerateCommand.RouteStrategyToHuman(strategyFlag: null, interactive: false));
     }
 
     [Fact]
     public void Plan_generate_with_an_explicit_single_strategy_does_not_refuse_on_a_non_interactive_terminal()
     {
-        Assert.True(PlanGenerateCommand.RouteStrategyToHuman(strategyFlag: "single", interactive: false));
+        Assert.Equal("single", PlanGenerateCommand.RouteStrategyToHuman(strategyFlag: "single", interactive: false));
     }
 
     [Fact]
-    public void Plan_generate_still_refuses_multi_even_when_given_explicitly()
+    public void Plan_generate_accepts_multi_now_that_SUG13_built_it()
     {
-        // Multi-candidate is deferred regardless of terminal; the refusal is unchanged.
-        Assert.False(PlanGenerateCommand.RouteStrategyToHuman(strategyFlag: "multi", interactive: false));
+        // The spec's own precondition (a proven single-candidate + implementer loop)
+        // was met 2026-07-08; the old refusal is retired.
+        Assert.Equal("multi", PlanGenerateCommand.RouteStrategyToHuman(strategyFlag: "multi", interactive: false));
     }
 }
