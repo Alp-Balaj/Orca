@@ -31,6 +31,12 @@ public enum InvocationStopReason
     /// reported afterwards exists to classify.</summary>
     TimedOut,
 
+    /// <summary>Killed because the caller's cancellation fired — a human interrupt
+    /// (BF-12 §1). Distinct from <see cref="TimedOut"/> so the on-disk evidence names
+    /// the right killer; run state never records it (the interrupt path skips the
+    /// state merge and the resume machinery recovers the attempt).</summary>
+    Interrupted,
+
     /// <summary>Everything else — surfaced with the CLI's own <c>result</c> text, never
     /// a guess at a more specific cause.</summary>
     Failed,

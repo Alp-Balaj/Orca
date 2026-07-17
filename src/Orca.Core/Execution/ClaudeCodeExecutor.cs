@@ -196,16 +196,18 @@ public sealed class ClaudeCodeExecutor(TimeSpan? drainGrace = null) : IClaudeExe
         var timedOut = false;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(options.Timeout);
+        var interrupted = false;
         try
         {
             await process.WaitForExitAsync(timeout.Token);
         }
         catch (OperationCanceledException)
         {
-            // Hard kill of the whole tree; recorded as a timeout, never conflated with
-            // the CLI's own exit code. A caller-requested cancellation kills the same
-            // way, then rethrows below.
-            timedOut = true;
+            // Hard kill of the whole tree, but the LEDGER must name the right killer
+            // (BF-12 §1): a human Ctrl-C is an interrupt, not a wall-clock timeout —
+            // the on-disk evidence used to permanently misattribute it.
+            interrupted = cancellationToken.IsCancellationRequested;
+            timedOut = !interrupted;
             try
             {
                 process.Kill(entireProcessTree: true);
@@ -245,10 +247,19 @@ public sealed class ClaudeCodeExecutor(TimeSpan? drainGrace = null) : IClaudeExe
                 ["elapsed_ms"] = stopwatch.ElapsedMilliseconds,
             });
         }
+        else if (interrupted)
+        {
+            runLog.WriteExecutorEvent("cancel_kill", new Dictionary<string, object?>
+            {
+                ["elapsed_ms"] = stopwatch.ElapsedMilliseconds,
+            });
+        }
 
         var execution = new ClaudeExecutionResult
         {
-            Outcome = timedOut ? ExecutionOutcome.TimedOut : ExecutionOutcome.Completed,
+            Outcome = timedOut ? ExecutionOutcome.TimedOut
+                : interrupted ? ExecutionOutcome.Cancelled
+                : ExecutionOutcome.Completed,
             ExitCode = process.ExitCode,
             SessionId = sessionId,
             Result = result,
@@ -267,7 +278,12 @@ public sealed class ClaudeCodeExecutor(TimeSpan? drainGrace = null) : IClaudeExe
             ["stop_reason"] = InvocationStopReasons.ToWire(execution.StopReason),
         });
 
-        cancellationToken.ThrowIfCancellationRequested();
+        // BF-12 §2: honor cancellation only when it actually killed the run. A cancel
+        // that arrived after the process completed successfully is not this
+        // invocation's problem — throwing here discarded a BILLED result (cost in the
+        // log, ledger silent); the caller's next token check stops the pipeline anyway.
+        if (interrupted)
+            cancellationToken.ThrowIfCancellationRequested();
 
         if (parseFailure is not null)
         {
@@ -308,6 +324,12 @@ public enum ExecutionOutcome
     /// <summary>Killed by the wall-clock ceiling. The exit code is the kill's, not the
     /// CLI's — surfaced separately so a timeout is never mistaken for a CLI failure.</summary>
     TimedOut,
+
+    /// <summary>Killed because the caller's cancellation token fired (a human
+    /// interrupt) — never conflated with the wall-clock timeout (BF-12 §1). Reached
+    /// only on the throw path; a cancel that lost the race to a completed process
+    /// yields <see cref="Completed"/> and the result is kept.</summary>
+    Cancelled,
 }
 
 /// <summary>What one invocation produced. <see cref="Result"/> is null when no

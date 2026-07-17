@@ -132,7 +132,14 @@ public class InvocationStopReasonTests
     [InlineData(InvocationStopReason.RateLimited, "rate_limited")]
     [InlineData(InvocationStopReason.BudgetExceeded, "budget_exceeded")]
     [InlineData(InvocationStopReason.TimedOut, "timed_out")]
+    [InlineData(InvocationStopReason.Interrupted, "interrupted")]
     [InlineData(InvocationStopReason.Failed, "failed")]
     public void Wire_spellings_are_snake_case(InvocationStopReason reason, string wire) =>
         Assert.Equal(wire, InvocationStopReasons.ToWire(reason));
+
+    [Fact]
+    public void A_cancel_kill_classifies_as_interrupted_never_timed_out() =>
+        // BF-12 §1: the ledger names the right killer.
+        Assert.Equal(InvocationStopReason.Interrupted, Execution(
+            outcome: ExecutionOutcome.Cancelled, exitCode: 137).StopReason);
 }

@@ -104,7 +104,10 @@ public sealed class CheckpointRunSession(
 
         var run = await _runner.RunAsync(preview, observer, cancellationToken);
 
-        if (run.Execution.Outcome == ExecutionOutcome.TimedOut || run.Execution.Result is not { IsError: false })
+        // BF-12: branch on the classifier, not a looser re-derivation — a run with
+        // is_error:false but a nonzero exit is Failed and must not proceed to
+        // verification and an approval offer while state records failed.
+        if (run.Execution.StopReason != InvocationStopReason.Succeeded)
         {
             var discarded = false;
             if (!workspace.IsClean()

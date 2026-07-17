@@ -22,6 +22,15 @@ public sealed class RunStateStore
     public string PathFor(string planId) =>
         Path.Combine(_stateRoot, VaultLayout.ValidatePlanId(planId) + ".json");
 
+    /// <summary>Removes the state file (BF-12 §3: rolling back a pre-spawn failure on a
+    /// first attempt, where there is no previous state to restore). Missing is fine.</summary>
+    public void Delete(string planId)
+    {
+        var path = PathFor(planId);
+        if (File.Exists(path))
+            File.Delete(path);
+    }
+
     /// <summary>Null when no run has started; throws on malformed state — a half-parsed
     /// resume point is worse than none.</summary>
     public RunState? Read(string planId)

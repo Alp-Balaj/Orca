@@ -321,7 +321,10 @@ public sealed class CheckpointRunner(
             PromptHashes = new Dictionary<string, string> { ["implementer"] = preview.PromptSha256 },
             AccumulatedCostUsd = previous?.AccumulatedCostUsd ?? 0m,
             LastUsage = previous?.LastUsage,
-            LastStopReason = previous?.LastStopReason,
+            // BF-12 §4: cleared, not carried — while this attempt is in flight (or after
+            // an interrupt) the previous attempt's stop reason must not render under the
+            // new attempt's number; null reads as "interrupted mid-run" everywhere.
+            LastStopReason = null,
             StartedAt = previous?.StartedAt ?? now,
             UpdatedAt = now,
         };
@@ -331,10 +334,27 @@ public sealed class CheckpointRunner(
         // the attempt is always 1 (log stem: <checkpoint>.attempt-<n>.ndjson).
         observer?.OnRunEvent(new RunObservation.RoleStarted(
             RoleName.Implementer, preview.Attempt, Invocation: 1, preview.LogPaths.EventLog));
-        var execution = await executor.ExecuteAsync(
-            preview.Options, preview.LogPaths,
-            observer is null ? null : new RoleStreamForwarder(observer, RoleName.Implementer),
-            cancellationToken);
+        ClaudeExecutionResult execution;
+        try
+        {
+            execution = await executor.ExecuteAsync(
+                preview.Options, preview.LogPaths,
+                observer is null ? null : new RoleStreamForwarder(observer, RoleName.Implementer),
+                cancellationToken);
+        }
+        catch (ExecutorException e) when (e is not StreamParseException)
+        {
+            // BF-12 §3: every ExecutorException except the parse failure is pre-spawn
+            // (missing binary, bad workdir, prompt ceiling, log collision) — nothing was
+            // billed, so the incremented attempt must not stand. Three environment
+            // failures used to exhaust maxCheckpointAttempts and demand hand-editing
+            // .orca/state.
+            if (previous is null)
+                _stateStore.Delete(preview.Plan.PlanId);
+            else
+                _stateStore.Write(previous);
+            throw;
+        }
         observer?.OnRunEvent(new RunObservation.RoleFinished(RoleName.Implementer, execution));
 
         var updated = RunStateUpdates.Apply(state, execution, _clock.GetUtcNow());
