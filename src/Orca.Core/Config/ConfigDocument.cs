@@ -26,6 +26,11 @@ public sealed record ConfigDocument
     public PlanningSection? Planning { get; init; }
     public IReadOnlyList<string>? DeniedTools { get; init; }
     public RolesSection? Roles { get; init; }
+
+    /// <summary>SUG-06 §5: optional prompt-size ceiling in bytes — Prepare refuses a
+    /// prompt above it BEFORE anything is billed (the executor's 512 KiB stdin ceiling
+    /// still backstops delivery; this one is a budget guard the human tunes).</summary>
+    public int? MaxPromptBytes { get; init; }
     public IReadOnlyDictionary<string, string>? Vaults { get; init; }
 
     /// <summary>"warn" or "refuse" for what a <c>claude_code_version</c> mismatch against

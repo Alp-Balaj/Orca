@@ -392,7 +392,7 @@ public sealed class CheckpointVerifier(
         var hashes = state.PromptHashes.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
         hashes[roleKey] = roleSha256;
         _stateStore.Write(RunStateUpdates.Apply(
-            state with { PromptHashes = hashes }, execution, _clock.GetUtcNow()));
+            state with { PromptHashes = hashes }, execution, _clock.GetUtcNow(), roleKey));
     }
 
     /// <summary>First invocation number ≥ <paramref name="minimum"/> whose event log does

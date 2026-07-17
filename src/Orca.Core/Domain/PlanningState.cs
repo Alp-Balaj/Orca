@@ -34,6 +34,10 @@ public sealed record PlanningAttempt
     public required string? SessionId { get; init; }
     public required decimal CostUsd { get; init; }
 
+    /// <summary>SUG-06: this invocation's token usage (null when no result event arrived
+    /// — a timeout/crash — or for state written before this field existed).</summary>
+    public TokenUsage? Usage { get; init; }
+
     /// <summary>SHA-256 of the fully assembled prompt this attempt ran with (retry
     /// prompts differ from the initial one); the role prompt file's own hash lives in
     /// <see cref="PlanningState.PromptFileHashes"/>.</summary>

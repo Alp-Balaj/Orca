@@ -381,4 +381,26 @@ public sealed class ConfigLoaderTests : IDisposable
 
         Assert.Null(ConfigLoader.Load(repo, GlobalWithVault()).GateTimeout);
     }
+
+    [Fact]
+    public void Max_prompt_bytes_must_be_positive_and_merges_repo_over_global()
+    {
+        var global = WriteGlobalConfig($$"""
+            {
+              "schemaVersion": 1,
+              "vaults": { "brian-the-brain": {{System.Text.Json.JsonSerializer.Serialize(Path.Combine(_root, "vault"))}} },
+              "maxPromptBytes": 0
+            }
+            """);
+        var repoPath = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] }
+            }
+            """);
+
+        var e = Assert.Throws<ConfigException>(() => ConfigLoader.Load(repoPath, global));
+        Assert.Contains("maxPromptBytes must be >= 1, got 0", e.Message);
+    }
 }

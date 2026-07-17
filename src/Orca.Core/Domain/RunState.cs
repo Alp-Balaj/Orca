@@ -55,6 +55,13 @@ public sealed record RunState
     /// <see cref="LastRateLimitStatus"/>.</summary>
     public long? LastRateLimitResetsAt { get; init; }
 
+    /// <summary>SUG-06: accumulated token usage per role key ("implementer",
+    /// "reconciler", "verifier"), summed across every invocation of this plan's run —
+    /// where spend attribution lives, and the fix for BF-07's "last invocation wins"
+    /// clobber. Not <c>required</c>, same back-compat rationale as
+    /// <see cref="LastModel"/>; null means a state written before this field existed.</summary>
+    public IReadOnlyDictionary<string, TokenUsage>? UsageByRole { get; init; }
+
     public required DateTimeOffset StartedAt { get; init; }
     public required DateTimeOffset UpdatedAt { get; init; }
 }

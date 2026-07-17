@@ -56,6 +56,7 @@ public static class ConfigLoader
         GateTimeoutSeconds = repo.GateTimeoutSeconds ?? global.GateTimeoutSeconds,
         MaxParseRetries = repo.MaxParseRetries ?? global.MaxParseRetries,
         MaxCheckpointAttempts = repo.MaxCheckpointAttempts ?? global.MaxCheckpointAttempts,
+        MaxPromptBytes = repo.MaxPromptBytes ?? global.MaxPromptBytes,
         Planning = new PlanningSection
         {
             Candidates = repo.Planning?.Candidates ?? global.Planning?.Candidates,
@@ -150,6 +151,9 @@ public static class ConfigLoader
         if (merged.MaxCheckpointAttempts is < 1)
             throw new ConfigException(
                 $"maxCheckpointAttempts must be >= 1, got {merged.MaxCheckpointAttempts}, after merging {repoPath} over {globalPath}");
+        if (merged.MaxPromptBytes is < 1)
+            throw new ConfigException(
+                $"maxPromptBytes must be >= 1, got {merged.MaxPromptBytes}, after merging {repoPath} over {globalPath}");
         if (merged.Planning?.Candidates is { } candidates and < 2)
             throw new ConfigException(
                 $"planning.candidates must be >= 2, got {candidates}, after merging {repoPath} over {globalPath}");
@@ -179,6 +183,7 @@ public static class ConfigLoader
                 : null,
             MaxParseRetries = merged.MaxParseRetries,
             MaxCheckpointAttempts = merged.MaxCheckpointAttempts,
+            MaxPromptBytes = merged.MaxPromptBytes,
             PlanningCandidates = merged.Planning?.Candidates,
             DeniedTools = denied,
             RoleSections = roles,

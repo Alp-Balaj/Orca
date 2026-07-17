@@ -167,4 +167,65 @@ public class RunStateUpdatesTests
         Assert.Equal(prior.LastUsage, updated.LastUsage);
         Assert.Equal(Now.AddMinutes(10), updated.UpdatedAt);
     }
+
+    [Fact]
+    public void A_judge_invocation_never_clobbers_the_implementers_session_or_last_usage()
+    {
+        // BF-07: after a green pipeline, run state's session id anchored the VERIFIER's
+        // vault-scoped session (and landed in the approval commit trailer), and "last
+        // usage" showed the judge's small counts instead of the Implementer's.
+        var afterImplementer = RunStateUpdates.Apply(State(), Completed(), Now);
+
+        var judge = Completed() with
+        {
+            SessionId = "judge-session",
+            Result = Completed().Result! with
+            {
+                SessionId = "judge-session",
+                Usage = new TokenUsage
+                {
+                    InputTokens = 9,
+                    OutputTokens = 9,
+                    CacheCreationInputTokens = 0,
+                    CacheReadInputTokens = 0,
+                },
+            },
+        };
+        var afterVerifier = RunStateUpdates.Apply(afterImplementer, judge, Now.AddMinutes(1), "verifier");
+
+        Assert.Equal(afterImplementer.SessionId, afterVerifier.SessionId);
+        Assert.Equal(afterImplementer.LastUsage, afterVerifier.LastUsage);
+        // Cost still accumulates for every role.
+        Assert.Equal(afterImplementer.AccumulatedCostUsd + 0.16m, afterVerifier.AccumulatedCostUsd);
+    }
+
+    [Fact]
+    public void Usage_accumulates_per_role_across_invocations()
+    {
+        var one = RunStateUpdates.Apply(State(), Completed(), Now);
+        var two = RunStateUpdates.Apply(one, Completed(), Now.AddMinutes(1));
+        var three = RunStateUpdates.Apply(two, Completed(), Now.AddMinutes(2), "verifier");
+
+        Assert.Equal(2 * 2716, three.UsageByRole!["implementer"].InputTokens);
+        Assert.Equal(2 * 206, three.UsageByRole["implementer"].OutputTokens);
+        Assert.Equal(2716, three.UsageByRole["verifier"].InputTokens);
+    }
+
+    [Fact]
+    public void An_invocation_without_a_result_event_leaves_usage_by_role_untouched()
+    {
+        var prior = RunStateUpdates.Apply(State(), Completed(), Now);
+        var timedOut = new ClaudeExecutionResult
+        {
+            Outcome = ExecutionOutcome.TimedOut,
+            ExitCode = 137,
+            SessionId = null,
+            Result = null,
+            Elapsed = TimeSpan.FromMilliseconds(250),
+        };
+
+        var updated = RunStateUpdates.Apply(prior, timedOut, Now.AddMinutes(1));
+
+        Assert.Equal(prior.UsageByRole, updated.UsageByRole);
+    }
 }

@@ -49,6 +49,11 @@ public sealed record OrcaConfig
     /// (spec §8); consumed from step 7 on, required only then.</summary>
     public required int? MaxCheckpointAttempts { get; init; }
 
+    /// <summary>SUG-06 §5: optional prompt-size ceiling in bytes. Prepare refuses above
+    /// it before anything is billed; absent means only the executor's hard stdin ceiling
+    /// applies. Not <c>required</c> so existing fixtures keep building.</summary>
+    public int? MaxPromptBytes { get; init; }
+
     public required int? PlanningCandidates { get; init; }
 
     /// <summary>Safety layer 2: passed to every role invocation as a generated
