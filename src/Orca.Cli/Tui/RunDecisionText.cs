@@ -73,6 +73,13 @@ internal static class RunDecisionText
                 new(Money(r.TotalCostUsd), TuiRole.Text),
                 new($" · {(r.NumTurns == 1 ? "1 turn" : $"{r.NumTurns} turns")}", TuiRole.Dim)));
         }
+
+        // BF-08: a non-benign rate-limit status is evidence worth showing wherever the
+        // invocation result renders — with resets-at when the CLI offered one.
+        if (e.LastRateLimit is { } rl && !InvocationStopReasons.IsBenignRateLimitStatus(rl.Status))
+            lines.Add(StyledLine.Of(
+                new("  rate limit   ", TuiRole.Dim),
+                new($"status '{rl.Status}'{rl.ResetsAtText}", TuiRole.Warning)));
     }
 
     /// <summary>Mirrors CheckpointRenderer.RenderVerification: gates (from the live results

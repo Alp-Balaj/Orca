@@ -57,11 +57,13 @@ internal static class PlanOutcomeText
         switch (last?.StopReason)
         {
             case InvocationStopReason.RateLimited:
-                var resets = outcome.LastExecution.LastRateLimit?.ResetsAt is { } ts
-                    ? $" (window resets {DateTimeOffset.FromUnixTimeSeconds(ts).ToLocalTime():yyyy-MM-dd HH:mm zzz})"
-                    : "";
-                Head(lines, "rate-limited", TuiRole.Warning);
-                Body(lines, $"the subscription window is exhausted{resets} — nothing is retried automatically; re-run plan-generate later and attempt numbering resumes.");
+                // BF-08: same honesty as the checkpoint lane — an unrecognized status is
+                // a possible rate limit, not a certain exhaustion.
+                var rateLimit = outcome.LastExecution.LastRateLimit;
+                Head(lines, "possible rate limit", TuiRole.Warning);
+                Body(lines,
+                    $"status '{rateLimit?.Status ?? "unknown"}'{rateLimit?.ResetsAtText} — nothing is retried " +
+                    "automatically; re-run plan-generate later and attempt numbering resumes. If quota wasn't the cause, the run log has the CLI's full story.");
                 break;
             case InvocationStopReason.AuthFailed:
                 Head(lines, "authentication failed", TuiRole.Error);

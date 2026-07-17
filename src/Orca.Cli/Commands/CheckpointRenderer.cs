@@ -61,6 +61,10 @@ internal static class CheckpointRenderer
             table.AddRow("cost", $"${r.TotalCostUsd}");
             table.AddRow("tokens in/out", $"{r.Usage.InputTokens}/{r.Usage.OutputTokens}");
         }
+        // BF-08: a non-benign rate-limit status is evidence worth showing wherever the
+        // invocation result renders — with resets-at when the CLI offered one.
+        if (e.LastRateLimit is { } rl && !InvocationStopReasons.IsBenignRateLimitStatus(rl.Status))
+            table.AddRow("rate limit", $"status '{rl.Status.EscapeMarkup()}'{rl.ResetsAtText.EscapeMarkup()}");
         table.AddRow("session", (e.SessionId ?? "(none)").EscapeMarkup());
         table.AddRow("accumulated cost", $"${outcome.RunState.AccumulatedCostUsd}");
         AnsiConsole.Write(new Panel(table).Header("invocation result"));
@@ -153,8 +157,14 @@ internal static class CheckpointRenderer
         switch (verification.FailureStopReason)
         {
             case InvocationStopReason.RateLimited:
+                // BF-08: no genuine exhaustion has ever been captured, so this is an
+                // inference from an unrecognized status — say so instead of asserting
+                // "exhausted" and sending the human away for hours over a non-quota bug.
+                var rateLimit = verification.FailureRateLimit;
                 AnsiConsole.MarkupLine(
-                    $"[red]rate-limited:[/] the subscription window is exhausted — nothing is retried automatically; re-run checkpoint-run later and verification resumes where it stopped.");
+                    $"[red]possible rate limit[/] (status '{(rateLimit?.Status ?? "unknown").EscapeMarkup()}')" +
+                    $"{(rateLimit?.ResetsAtText ?? "").EscapeMarkup()} — nothing is retried automatically; re-run " +
+                    "checkpoint-run later and verification resumes where it stopped. If quota wasn't the cause, the run log has the CLI's full story.");
                 break;
             case InvocationStopReason.AuthFailed:
                 AnsiConsole.MarkupLine(

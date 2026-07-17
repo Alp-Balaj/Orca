@@ -100,8 +100,12 @@ internal static class RunOutcomeText
         var role = verification?.FailureRole ?? "verification";
         var message = verification?.FailureStopReason switch
         {
+            // BF-08: an inference from an unrecognized status, not a captured
+            // exhaustion — say "possible", name the status, show resets-at when known.
             InvocationStopReason.RateLimited =>
-                "rate-limited: the subscription window is exhausted — re-run later and verification resumes where it stopped.",
+                $"possible rate limit (status '{verification?.FailureRateLimit?.Status ?? "unknown"}')" +
+                $"{verification?.FailureRateLimit?.ResetsAtText} — re-run later and verification resumes " +
+                "where it stopped; if quota wasn't the cause, the run log has the CLI's full story.",
             InvocationStopReason.AuthFailed =>
                 "authentication failed: this machine's claude login is missing or expired — run claude interactively to log in, then re-run.",
             InvocationStopReason.BudgetExceeded =>

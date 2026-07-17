@@ -15,6 +15,16 @@ public static class RunStateUpdates
             LastUsage = execution.Result?.Usage ?? state.LastUsage,
             LastStopReason = execution.StopReason,
             LastModel = execution.ObservedModel ?? state.LastModel,
+            // BF-08: keep the last non-benign rate-limit evidence instead of discarding
+            // it after classification; a run that saw only benign statuses clears it.
+            LastRateLimitStatus = NonBenignRateLimit(execution)?.Status,
+            LastRateLimitResetsAt = NonBenignRateLimit(execution)?.ResetsAt,
             UpdatedAt = now,
         };
+
+    private static RateLimitInfo? NonBenignRateLimit(ClaudeExecutionResult execution) =>
+        execution.LastRateLimit is { } rateLimit
+        && !InvocationStopReasons.IsBenignRateLimitStatus(rateLimit.Status)
+            ? rateLimit
+            : null;
 }

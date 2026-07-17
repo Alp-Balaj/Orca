@@ -84,6 +84,36 @@ public class InvocationStopReasonTests
             rateLimit: new RateLimitInfo { Status = "queued" }).StopReason);
 
     [Fact]
+    public void A_failed_run_with_an_allowed_prefixed_warning_status_is_not_rate_limited() =>
+        // BF-08: Claude Code emits warning-class statuses on healthy runs as the window
+        // fills; a failure with one of those in its tail failed for its own reason, and
+        // "wait hours for a problem that was never quota" is exactly the wrong guidance.
+        Assert.Equal(InvocationStopReason.Failed, Execution(
+            exitCode: 1,
+            result: Result(isError: true, text: "some model refusal"),
+            rateLimit: new RateLimitInfo { Status = "allowed_warning" }).StopReason);
+
+    [Fact]
+    public void Auth_outranks_success_because_the_fixtures_hide_auth_behind_success()
+    {
+        // BF-08 pins the load-bearing order: both captured auth fixtures carry a result
+        // claiming success while the error:"authentication_failed" event tells the
+        // truth. If a genuinely-successful run with a transient auth flag is ever
+        // captured, its fixture belongs in the suite before this order changes.
+        Assert.Equal(InvocationStopReason.AuthFailed, Execution(
+            exitCode: 0, result: Result(isError: false), authFailed: true).StopReason);
+    }
+
+    [Theory]
+    [InlineData("allowed", true)]
+    [InlineData("allowed_warning", true)]
+    [InlineData("rejected", false)]
+    [InlineData("exceeded", false)]
+    [InlineData("queued", false)]
+    public void Benign_statuses_are_exactly_the_allowed_prefix(string status, bool benign) =>
+        Assert.Equal(benign, InvocationStopReasons.IsBenignRateLimitStatus(status));
+
+    [Fact]
     public void Anything_else_fails_honestly_without_a_guess()
     {
         // A refusal-shaped failure: is_error, no auth event, no rate-limit evidence.

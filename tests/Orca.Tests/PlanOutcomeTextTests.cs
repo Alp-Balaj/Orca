@@ -41,8 +41,11 @@ public sealed class PlanOutcomeTextTests
         var text = Plain(PlanOutcomeText.Describe(TuiTestData.MakePlanningOutcome(
             PlanningRunStatus.Failed, InvocationStopReason.RateLimited, rateLimit: reset)));
 
-        Assert.Contains("rate-limited", text);
-        Assert.Contains("subscription window is exhausted", text);
+        // BF-08: an inference from an unrecognized status, never asserted exhaustion —
+        // the status is named and the reset window still shown.
+        Assert.Contains("possible rate limit", text);
+        Assert.Contains("status 'exceeded'", text);
+        Assert.DoesNotContain("exhausted", text);
         Assert.Contains("window resets", text);
         Assert.Contains("attempt numbering resumes", text);
     }
