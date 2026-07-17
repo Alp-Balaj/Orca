@@ -37,7 +37,9 @@ internal static class Frontmatter
         var pos = 0;
         var firstLine = NextLine(fileText, ref pos);
         if (firstLine is null || TrimCr(firstLine) != "---")
-            throw new VaultSchemaException(filePath, "file must start with a '---' frontmatter delimiter");
+            throw new VaultSchemaException(filePath, fileText.StartsWith('\uFEFF')
+                ? "file begins with a byte-order mark (U+FEFF) before the '---' frontmatter delimiter — save it without a BOM"
+                : "file must start with a '---' frontmatter delimiter");
 
         var yamlStart = pos;
         while (true)

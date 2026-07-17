@@ -44,6 +44,11 @@ internal sealed class MappingReader
         var scalar = RequireScalar(key);
         if (IsNull(scalar) || string.IsNullOrWhiteSpace(scalar.Value))
             throw Violation($"'{key}' must be a non-empty string");
+        // BF-14 §2: every frontmatter string is structurally one line — a block scalar
+        // (`title: |`) parses as YAML but breaks bullet rendering, the Verifier's
+        // byte-exact echo, and (for base_branch) git itself.
+        if (scalar.Value!.Contains('\n'))
+            throw Violation($"'{key}' must be a single line — block scalars and embedded newlines break the byte-exact contracts downstream");
         return scalar.Value!;
     }
 
@@ -112,6 +117,11 @@ internal sealed class MappingReader
         {
             if (node is not YamlScalarNode scalar || IsNull(scalar) || string.IsNullOrWhiteSpace(scalar.Value))
                 throw Violation($"'{key}' items must be non-empty strings");
+            // BF-14 §2: each list item (an acceptance criterion, a missing/extra entry)
+            // is one line by contract — prompts render them as single bullets and the
+            // Verifier echoes them byte-exact.
+            if (scalar.Value!.Contains('\n'))
+                throw Violation($"'{key}' items must be single lines — an item with embedded newlines breaks the byte-exact contracts downstream");
             items.Add(scalar.Value!);
         }
 

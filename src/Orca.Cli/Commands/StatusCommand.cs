@@ -55,6 +55,9 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             $"[bold]{plan.Title.EscapeMarkup()}[/] — {plan.PlanId.EscapeMarkup()} v{plan.PlanVersion}, status [bold]{plan.Status}[/], base branch {plan.BaseBranch.EscapeMarkup()}");
         AnsiConsole.MarkupLine(
             $"repo {report.RepoRoot.EscapeMarkup()} on branch [bold]{report.CurrentBranch.EscapeMarkup()}[/]{(report.WorkingTreeClean ? "" : " [yellow](dirty)[/]")}");
+        // BF-14 §3: hand-edited contradictions that parse cleanly get said out loud.
+        foreach (var warning in PlanParser.LintInvariants(plan))
+            AnsiConsole.MarkupLine($"[yellow]{warning.EscapeMarkup()}[/]");
         AnsiConsole.WriteLine();
 
         var table = new Table().AddColumns("", "checkpoint", "description", "status");

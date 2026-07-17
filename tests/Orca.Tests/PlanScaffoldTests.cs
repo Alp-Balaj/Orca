@@ -55,31 +55,30 @@ public sealed class PlanScaffoldTests : IDisposable
 
     private const string TrickyText = "Line one\r\nLine two\ttabbed";
 
+    // BF-14 §2 revises BF-04's stance for newlines specifically: the escape machinery
+    // CAN round-trip them (proven by the tab surviving below), but every downstream
+    // consumer assumes one line — so multi-line values now refuse loudly up front
+    // instead of round-tripping into a plan that breaks prompts, echoes, and git.
     [Fact]
-    public void Titles_with_newlines_and_all_separators_survive_the_round_trip()
+    public void Multiline_title_repo_and_branch_refuse_loudly_before_anything_is_written()
     {
-        PlanScaffold.CreatePlan(Layout(), "tricky-title", TrickyText, "Repo", "main", Now);
+        Assert.Contains("single line", Assert.Throws<ArgumentException>(() =>
+            PlanScaffold.CreatePlan(Layout(), "tricky-title", TrickyText, "Repo", "main", Now)).Message);
+        Assert.Contains("single line", Assert.Throws<ArgumentException>(() =>
+            PlanScaffold.CreatePlan(Layout(), "tricky-repo", "Title", TrickyText, "main", Now)).Message);
+        Assert.Contains("single line", Assert.Throws<ArgumentException>(() =>
+            PlanScaffold.CreatePlan(Layout(), "tricky-branch", "Title", "Repo", TrickyText, Now)).Message);
+        Assert.False(Directory.Exists(Path.Combine(Layout().PlansRoot, "tricky-title")));
+    }
+
+    [Fact]
+    public void Single_line_values_with_tabs_and_every_separator_still_round_trip()
+    {
+        const string tricky = "Line one\ttabbed: with #hash \"quotes\" and \\ slashes";
+        PlanScaffold.CreatePlan(Layout(), "tricky-title", tricky, "Repo", "main", Now);
 
         var plan = new VaultReader(Layout()).ReadPlan("tricky-title");
-        Assert.Equal(TrickyText, plan.Title);
-    }
-
-    [Fact]
-    public void Target_repo_with_newlines_and_all_separators_survives_the_round_trip()
-    {
-        PlanScaffold.CreatePlan(Layout(), "tricky-repo", "Title", TrickyText, "main", Now);
-
-        var plan = new VaultReader(Layout()).ReadPlan("tricky-repo");
-        Assert.Equal(TrickyText, plan.TargetRepo);
-    }
-
-    [Fact]
-    public void Base_branch_with_newlines_and_all_separators_survives_the_round_trip()
-    {
-        PlanScaffold.CreatePlan(Layout(), "tricky-branch", "Title", "Repo", TrickyText, Now);
-
-        var plan = new VaultReader(Layout()).ReadPlan("tricky-branch");
-        Assert.Equal(TrickyText, plan.BaseBranch);
+        Assert.Equal(tricky, plan.Title);
     }
 
     [Fact]

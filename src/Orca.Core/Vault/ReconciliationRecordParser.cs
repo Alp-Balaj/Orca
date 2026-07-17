@@ -39,8 +39,15 @@ public static class ReconciliationRecordParser
         var (root, body) = Frontmatter.Parse(fileText, filePath);
         var fm = new MappingReader(root, filePath, "frontmatter");
 
+        // BF-14 §4: version first, like PlanParser — a future v2 record must error
+        // "unsupported schema_version", never "unknown key(s)".
+        var schemaVersion = fm.RequireInt("schema_version");
+        if (schemaVersion != VaultSchema.Version)
+            throw new VaultSchemaException(filePath,
+                $"unsupported schema_version {schemaVersion}; this build of Orca supports version {VaultSchema.Version}");
+
         var record = new ReconciliationRecord(
-            fm.RequireInt("schema_version"),
+            schemaVersion,
             fm.RequireString("plan_id"),
             fm.RequireInt("plan_version"),
             fm.RequireString("checkpoint_id"),
