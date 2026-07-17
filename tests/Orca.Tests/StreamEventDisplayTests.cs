@@ -129,4 +129,26 @@ public class StreamEventDisplayTests
         var drifted = new ClaudeStreamEvent { Type = "rate_limit_event", RawLine = """{"type":"rate_limit_event"}""" };
         Assert.Equal("rate_limit_event", Assert.Single(StreamEventDisplay.Describe(drifted)).Text);
     }
+
+    [Fact]
+    public void The_clip_cap_never_splits_a_grapheme_cluster()
+    {
+        // BF-15: 200 ZWJ emoji are 1000 code units but 200 clusters; the old code-unit
+        // slice cut mid-cluster into replacement glyphs at the ellipsis.
+        var emoji = "\U0001F9D1\u200D\U0001F4BB"; // person + ZWJ + laptop
+        var text = string.Concat(Enumerable.Repeat(emoji, 200));
+        var raw = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            type = "assistant",
+            message = new { content = new object[] { new { type = "text", text } } },
+        });
+
+        var line = StreamEventDisplay.Describe(ClaudeStreamEvent.Parse(raw))
+            .Single(l => l.Kind == DisplayKind.AssistantText);
+
+        Assert.EndsWith("\u2026", line.Text);
+        // Every emoji before the ellipsis is intact — the length is an exact multiple
+        // of the cluster's code-unit size.
+        Assert.Equal(0, (line.Text.Length - 1) % emoji.Length);
+    }
 }

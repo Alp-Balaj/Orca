@@ -63,4 +63,45 @@ public sealed class StyledWrapTests
 
         Assert.Same(line, Assert.Single(StyledWrap.Wrap([line], 3)));
     }
+
+    // --- BF-15: display columns, not UTF-16 code units ---
+
+    [Fact]
+    public void CJK_text_wraps_by_display_columns_not_code_units()
+    {
+        // Ten CJK chars = 10 code units but 20 columns: at width 12 they can't share a
+        // row with anything and must split across rows, where the old code-unit math
+        // kept them on one row and let the terminal clip mid-line.
+        var lines = StyledWrap.Wrap([StyledLine.Plain("汉字汉字汉 汉字汉字汉")], width: 12);
+
+        Assert.Equal(2, lines.Count);
+    }
+
+    [Fact]
+    public void ZWJ_emoji_count_their_display_width_not_their_code_units()
+    {
+        // The technologist emoji is 5 UTF-16 code units but 2 display columns — the old
+        // math wrapped it far too early.
+        var emoji = "\U0001F9D1\u200D\U0001F4BB"; // person + ZWJ + laptop
+        var line = StyledLine.Plain($"{emoji} {emoji} {emoji} ok");
+
+        // 3 emoji (2 cols each) + 3 spaces + "ok" = 11 columns — fits in width 12 as one
+        // row; code-unit math would have counted 17+ and split it.
+        var lines = StyledWrap.Wrap([line], width: 12);
+
+        Assert.Single(lines);
+    }
+
+    [Fact]
+    public void Column_clipping_never_splits_a_surrogate_pair()
+    {
+        var text = "ab\U0001F600cd"; // 😀 is a surrogate pair, 2 columns
+        // 3 columns: "ab" fits (2), the emoji (2 more) would exceed — the clip must cut
+        // BEFORE the pair, not through it.
+        var clipped = TuiWidth.ClipToColumns(text, 3);
+
+        Assert.Equal("ab", clipped);
+        // And a clip wide enough takes the whole pair intact.
+        Assert.Equal("ab\U0001F600", TuiWidth.ClipToColumns(text, 4));
+    }
 }

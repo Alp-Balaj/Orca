@@ -54,7 +54,7 @@ internal static class StyledWrap
         var result = new List<StyledLine>(lines.Count);
         foreach (var line in lines)
         {
-            if (line.PlainText().Length <= width)
+            if (TuiWidth.Columns(line.PlainText()) <= width)
             {
                 result.Add(line);
                 continue;
@@ -83,15 +83,16 @@ internal static class StyledWrap
             if (pad.Length > 0)
             {
                 current.Add(new StyledRun(pad, TuiRole.Text));
-                currentWidth = pad.Length;
+                currentWidth = TuiWidth.Columns(pad);
             }
         }
 
         foreach (var (word, role) in Words(line))
         {
+            var wordWidth = TuiWidth.Columns(word);
             if (current.Count == 0)
                 StartRow();
-            else if (currentWidth + 1 + word.Length > width)
+            else if (currentWidth + 1 + wordWidth > width)
             {
                 result.Add(new StyledLine(current));
                 current = [];
@@ -106,7 +107,7 @@ internal static class StyledWrap
             }
 
             current.Add(new StyledRun(word, role));
-            currentWidth += word.Length;
+            currentWidth += wordWidth;
         }
 
         if (current.Count > 0)
