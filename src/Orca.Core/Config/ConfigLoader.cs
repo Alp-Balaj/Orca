@@ -130,6 +130,13 @@ public static class ConfigLoader
             throw new ConfigException($"vault.name is required after merging {repoPath} over {globalPath}");
 
         var plansDir = merged.Vault?.PlansDir;
+        // BF-09 §4: a backslashed plansDir works on Windows and silently becomes one
+        // literal directory name on Linux — same vault, different behavior per machine.
+        // Reject it identically everywhere.
+        if (plansDir?.Contains('\\') == true)
+            throw new ConfigException(
+                $"vault.plansDir '{plansDir}' contains backslashes — spell it with forward slashes " +
+                $"(portable across both machines), after merging {repoPath} over {globalPath}");
         if (string.IsNullOrWhiteSpace(plansDir))
             throw new ConfigException($"vault.plansDir is required after merging {repoPath} over {globalPath}");
 

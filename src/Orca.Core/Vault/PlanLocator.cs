@@ -24,6 +24,41 @@ public static class PlanLocator
             .ToList();
     }
 
+    /// <summary>BF-09 §3: plan-shaped directories <see cref="ListPlanIds"/> silently
+    /// skips, each with the reason a human can act on. The classic two-machine trap: a
+    /// `FOO.md` spine inside `foo/` works on Windows and is invisible on Linux — same
+    /// vault, different plan list per machine, and nothing said so.</summary>
+    public static IReadOnlyList<string> ListSkippedPlanDirectories(VaultLayout layout)
+    {
+        if (!Directory.Exists(layout.PlansRoot))
+            return [];
+
+        var warnings = new List<string>();
+        foreach (var dir in Directory.EnumerateDirectories(layout.PlansRoot))
+        {
+            var name = Path.GetFileName(dir);
+            if (SchemaRegexes.PlanId().IsMatch(name))
+            {
+                if (File.Exists(Path.Combine(dir, name + ".md")))
+                    continue;
+
+                var differentCase = Directory.EnumerateFiles(dir, "*.md")
+                    .Select(Path.GetFileName)
+                    .FirstOrDefault(f => string.Equals(f, name + ".md", StringComparison.OrdinalIgnoreCase));
+                warnings.Add(differentCase is not null
+                    ? $"plan directory '{name}' skipped: found '{differentCase}', expected '{name}.md' — case matters on this machine even if it didn't on the other one"
+                    : $"plan directory '{name}' skipped: no '{name}.md' spine file");
+            }
+            else if (SchemaRegexes.PlanId().IsMatch(name.ToLowerInvariant()))
+            {
+                warnings.Add(
+                    $"directory '{name}' skipped: plan ids are lowercase — rename it (and its spine) to '{name.ToLowerInvariant()}'");
+            }
+        }
+
+        return warnings;
+    }
+
     public static string ResolvePlanId(VaultLayout layout, string? explicitPlanId)
     {
         if (explicitPlanId is not null)

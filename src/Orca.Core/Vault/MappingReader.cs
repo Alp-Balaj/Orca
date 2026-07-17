@@ -78,7 +78,11 @@ internal sealed class MappingReader
             return value;
         }
 
-        throw Violation($"'{key}' must be an ISO-8601 timestamp with an explicit offset, e.g. 2026-07-06T14:00:00Z");
+        // BF-09 §6: Obsidian's Properties panel rewrites dates as '2026-07-06T14:00'
+        // (no seconds, no offset) — name the trap so the loud failure is also actionable.
+        throw Violation($"'{key}' must be an ISO-8601 timestamp with an explicit offset, e.g. 2026-07-06T14:00:00Z " +
+            "(Obsidian's Properties panel writes a seconds-less local form — edit dates in source mode, " +
+            "or use orca's own status commands, which never touch dates by hand)");
     }
 
     internal MappingReader RequireMapping(string key) =>

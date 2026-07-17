@@ -40,6 +40,11 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         var config = ConfigLoader.Load(workspace.RepoRoot);
         var layout = new VaultLayout(config.VaultRoot, config.PlansDir);
 
+        // BF-09 §3: a silently skipped plan directory is exactly the cross-machine
+        // divergence this command exists to expose — say it before anything else.
+        foreach (var warning in PlanLocator.ListSkippedPlanDirectories(layout))
+            AnsiConsole.MarkupLine($"[yellow]{warning.EscapeMarkup()}[/]");
+
         var planId = PlanLocator.ResolvePlanId(layout, settings.Plan);
         var report = StatusReportBuilder.Build(config, workspace, planId);
         var entry = report.Plans[0];
