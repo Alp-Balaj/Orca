@@ -40,24 +40,37 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
         [CommandOption("--override-unmerged-base")]
         [Description("Run anyway even though the previous checkpoint's approved branch is not yet merged into base_branch.")]
         public bool OverrideUnmergedBase { get; init; }
+
+        [CommandOption("--worktree")]
+        [Description("Run in a dedicated git worktree under .orca/worktrees/ instead of the main tree (SUG-03 stage B) — parallel lanes: another plan can run in the main tree or its own worktree at the same time.")]
+        public bool Worktree { get; init; }
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, Settings settings)
     {
         var workspace = GitWorkspace.Discover(settings.Repo ?? Directory.GetCurrentDirectory());
         var config = ConfigLoader.Load(workspace.RepoRoot);
-        // SUG-03 stage B groundwork: one Orca process per repo — two sessions fighting
-        // over one working tree and run state was previously possible and silent.
-        // --dry-run is read-only but goes through Prepare/branch checks; locking it too
-        // keeps the rule simple (it exits immediately anyway).
-        using var _ = OrcaLock.Acquire(workspace.RepoRoot);
+        var planId = Orca.Core.Vault.PlanLocator.ResolvePlanId(
+            new Orca.Core.Vault.VaultLayout(config.VaultRoot, config.PlansDir), settings.Plan);
+
+        // SUG-03 stage B: the plan is the true unit of exclusion — its run state,
+        // attempt numbering, and records tolerate exactly one writer. Every checkpoint
+        // run takes its plan's lock; a main-tree run ALSO takes the repo lock (it
+        // mutates the one shared working tree), while a worktree run leaves the repo
+        // lock free so another plan can run beside it. --dry-run is read-only but goes
+        // through Prepare/branch checks; locking it too keeps the rule simple.
+        using var planLock = OrcaLock.Acquire(workspace.RepoRoot, scope: planId);
+        using var repoLock = settings.Worktree ? null : OrcaLock.Acquire(workspace.RepoRoot);
+
+        if (settings.Worktree)
+            return await ExecuteInWorktreeAsync(config, workspace, planId, settings);
+
         var session = new CheckpointRunSession(config, workspace, new ClaudeCodeExecutor());
         var interactive = ConsoleInteractivity.Detect();
 
         // SUG-16 proposal A: after an Approve, offer to launch the next checkpoint in the
         // same session — the only thing this loop automates is *launching*, never
         // *deciding*; every checkpoint still stops at ExecuteAsync for its own gate.
-        string? planId = settings.Plan;
         string? checkpointId = settings.Checkpoint;
         while (true)
         {
@@ -115,6 +128,105 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
             planId = result.Preview.Plan.PlanId;
             checkpointId = next.Id;
         }
+    }
+
+    /// <summary>SUG-03 stage B: the same session, one checkpoint, in a dedicated linked
+    /// worktree under <c>.orca/worktrees/&lt;plan&gt;/&lt;checkpoint&gt;</c> — the main
+    /// tree stays free for another plan's run. Evidence stays shared: run state, run
+    /// logs, and vault records all anchor to the main repo (stateRepoRoot), so status,
+    /// resume, and attempt numbering read identically from either lane. No chaining
+    /// here — chaining fast-forwards the base branch, which is checked out in the main
+    /// tree, exactly what a side lane must not touch.</summary>
+    private static async Task<int> ExecuteInWorktreeAsync(
+        Orca.Core.Config.OrcaConfig config, GitWorkspace workspace, string planId, Settings settings)
+    {
+        // First Prepare against the main tree only to learn which checkpoint and branch
+        // this run is for — read-only, and re-done below against the worktree so
+        // PendingDecision and the prompt see the tree the run will actually use.
+        var scout = new CheckpointRunSession(config, workspace, new ClaudeCodeExecutor()).Prepare(
+            planId, settings.Checkpoint, settings.OverrideCompleteByEvidence, settings.OverrideUnmergedBase);
+
+        var worktreePath = Path.Combine(
+            workspace.RepoRoot, ".orca", "worktrees", scout.Plan.PlanId, scout.Checkpoint.Id);
+
+        if (settings.DryRun)
+        {
+            CheckpointRenderer.RenderPreview(scout);
+            CheckpointRenderer.RenderDryRun(scout);
+            AnsiConsole.MarkupLine($"[grey]worktree (would be created):[/] {worktreePath.EscapeMarkup()}");
+            return 0;
+        }
+
+        if (workspace.IsRegisteredWorktree(worktreePath))
+        {
+            AnsiConsole.MarkupLine($"[grey]resuming in existing worktree:[/] {worktreePath.EscapeMarkup()}");
+        }
+        else if (scout.BranchExists)
+        {
+            // Re-attempt: the branch carries the earlier attempts. Git refuses if it is
+            // checked out anywhere else — the structural one-tree-per-branch guard.
+            workspace.AddWorktreeForBranch(worktreePath, scout.Branch);
+            AnsiConsole.MarkupLine($"[grey]worktree created:[/] {worktreePath.EscapeMarkup()} on '{scout.Branch.EscapeMarkup()}'");
+        }
+        else
+        {
+            // Fresh run: detached at the base branch; the runner's own CreateBranchFrom
+            // creates the checkpoint branch inside the worktree (creating it at add time
+            // would trip Prepare's branch-without-evidence guard).
+            workspace.AddWorktreeDetached(worktreePath, scout.Plan.BaseBranch);
+            AnsiConsole.MarkupLine($"[grey]worktree created:[/] {worktreePath.EscapeMarkup()} at '{scout.Plan.BaseBranch.EscapeMarkup()}'");
+        }
+
+        var worktree = GitWorkspace.Discover(worktreePath);
+        var session = new CheckpointRunSession(
+            config, worktree, new ClaudeCodeExecutor(), stateRepoRoot: workspace.RepoRoot);
+        var interactive = ConsoleInteractivity.Detect();
+
+        var preview = session.Prepare(
+            planId, scout.Checkpoint.Id, settings.OverrideCompleteByEvidence, settings.OverrideUnmergedBase);
+        CheckpointRenderer.RenderPreview(preview);
+
+        if (preview.PendingDecision)
+            AnsiConsole.MarkupLine(
+                $"[yellow]attempt {preview.Attempt - 1} is still awaiting your decision[/] — reviewing it now instead of launching a new invocation.");
+
+        var gate = new SpectreCheckpointGate(interactive);
+        var result = await session.ExecuteAsync(preview, gate);
+        var exitCode = Render(result, gate);
+
+        if (result.Outcome is CheckpointSessionOutcome.Approved
+            or CheckpointSessionOutcome.Rejected or CheckpointSessionOutcome.Deferred)
+        {
+            if (DashboardWriter.TryWrite(config, workspace, out var dashboardWarning) is null)
+                AnsiConsole.MarkupLine($"[yellow]{dashboardWarning!.EscapeMarkup()}[/]");
+        }
+
+        if (result.Outcome == CheckpointSessionOutcome.Approved && interactive)
+            await OfferSessionNoteAsync(config, workspace, result);
+
+        // Lifecycle: a clean worktree has nothing left to decide — remove it (the branch
+        // and all evidence live in the main repo). A dirty one holds undecided work
+        // (defer, reject-keep, a failure's partial changes): keep it and say where.
+        if (worktree.IsClean())
+        {
+            try
+            {
+                workspace.RemoveWorktree(worktreePath);
+                AnsiConsole.MarkupLine($"[grey]worktree removed:[/] {worktreePath.EscapeMarkup()}");
+            }
+            catch (GitException e)
+            {
+                AnsiConsole.MarkupLine($"[yellow]could not remove worktree:[/] {e.Message.EscapeMarkup()}");
+            }
+        }
+        else
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]worktree kept (undecided changes):[/] {worktreePath.EscapeMarkup()} — re-run " +
+                "checkpoint-run --worktree to pick the decision back up.");
+        }
+
+        return exitCode;
     }
 
     private static async Task OfferSessionNoteAsync(

@@ -46,10 +46,11 @@ public sealed record CheckpointSessionResult
 /// calls after the gate has spoken. Both front ends are thin callers of this class, so
 /// the sequence can no longer fork between them.</summary>
 public sealed class CheckpointRunSession(
-    OrcaConfig config, GitWorkspace workspace, IClaudeExecutor executor, TimeProvider? clock = null)
+    OrcaConfig config, GitWorkspace workspace, IClaudeExecutor executor, TimeProvider? clock = null,
+    string? stateRepoRoot = null)
 {
-    private readonly CheckpointRunner _runner = new(config, workspace, executor);
-    private readonly CheckpointVerifier _verifier = new(config, workspace, executor);
+    private readonly CheckpointRunner _runner = new(config, workspace, executor, clock, stateRepoRoot);
+    private readonly CheckpointVerifier _verifier = new(config, workspace, executor, clock, stateRepoRoot);
     private readonly VaultLayout _layout = new(config.VaultRoot, config.PlansDir);
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
 

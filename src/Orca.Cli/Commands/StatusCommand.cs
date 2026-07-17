@@ -83,7 +83,7 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         if (ready.Count > 0)
             AnsiConsole.MarkupLine(
                 $"runnable now: [bold]{string.Join(", ", ready.Select(c => c.Id)).EscapeMarkup()}[/]" +
-                (ready.Count > 1 ? " — independent per depends_on; parallelize at will (two terminals, worktrees you manage)" : ""));
+                (ready.Count > 1 ? " — independent per depends_on; parallelize with checkpoint-run --worktree (one lane per plan)" : ""));
         else if (plan.Checkpoints.Any(c => c.Status == CheckpointStatus.Pending))
             AnsiConsole.MarkupLine(
                 "[yellow]no checkpoint is ready[/] — every pending one waits on an incomplete dependency.");

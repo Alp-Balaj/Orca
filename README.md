@@ -332,7 +332,7 @@ record from machine facts alone and spends nothing on the LLM roles.
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
                        [--base-branch main] [--strategy single|multi] [--no-scout]
                        [--dry-run] [--repo <path>]
-    orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
+    orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--worktree] [--dry-run] [--repo <path>]
     orca plan-approve [<plan-id>] [--revert] [--repo <path>]
     orca checkpoint-complete <checkpoint-id> [--plan <id>] [--reopen] [--anyway] [--repo <path>]
     orca doctor [--repo <path>]
@@ -349,6 +349,21 @@ invocation. After an Approve, the session offers the plan's next pending checkpo
 ("run it now?") — confirming fast-forwards the base branch and runs it in the same
 session, one gate per checkpoint as always. `--dry-run` prints the branch, assembled
 prompt, and exact argv without mutating anything.
+
+`--worktree` (SUG-03 stage B) runs the checkpoint in a dedicated linked worktree under
+`.orca/worktrees/<plan>/<checkpoint>` instead of the main tree — the parallel-lanes
+counterpart to `depends_on`: while it runs, the main tree (and other plans' worktrees)
+stay free for another plan's run. The unit of exclusion is the plan, enforced by a
+plan-scoped lock (`.orca/lock-<plan-id>`): two plans run side by side, but two runs of
+the *same* plan refuse — they would fight over one run state and attempt numbering. All
+evidence stays shared: run state, run logs, and vault records anchor to the main repo's
+`.orca/`, and the checkpoint branch is an ordinary branch of the shared repo, so
+`status`, resume, and the vault read identically from either lane. Lifecycle: the
+worktree is created on demand (reused when you resume a deferred decision), and removed
+automatically once it is clean — after Approve (the commit lives on the branch) or a
+confirmed discard; a tree holding undecided changes is always kept and named. Chaining
+("run next now?") is deliberately absent in worktree mode — it fast-forwards the base
+branch, which belongs to the main tree.
 
 `plan-approve` and `checkpoint-complete` are the scripting parity of the TUI's `a`/`m`
 keys: the same surgical frontmatter editor (flip exactly the status + `updated` lines,

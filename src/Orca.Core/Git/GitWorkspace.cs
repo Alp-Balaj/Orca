@@ -281,4 +281,47 @@ public sealed class GitWorkspace
         GitProcess.Run(RepoRoot, ["reset", "--hard", "HEAD"]);
         GitProcess.Run(RepoRoot, ["clean", "-fd"]);
     }
+
+    // --- SUG-03 stage B: linked-worktree mechanics, so parallel checkpoints each get
+    // their own tree while branches, objects, and refs stay shared with this repo. All
+    // three operations run from RepoRoot; the worktree itself is opened as its own
+    // GitWorkspace via Discover(path) afterwards.
+
+    /// <summary>True when <paramref name="path"/> is a registered linked worktree of
+    /// this repo (<c>git worktree list --porcelain</c>) — how a resumed worktree run
+    /// recognizes its existing tree instead of failing to re-create it.</summary>
+    public bool IsRegisteredWorktree(string path)
+    {
+        var full = Path.GetFullPath(path);
+        return GitProcess.Run(RepoRoot, ["worktree", "list", "--porcelain"]).Stdout
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(line => line.StartsWith("worktree ", StringComparison.Ordinal)
+                && Path.GetFullPath(line["worktree ".Length..]) == full);
+    }
+
+    /// <summary>Adds a detached worktree at <paramref name="commitish"/> — the fresh-run
+    /// shape: the checkpoint branch does not exist yet, and the runner's own
+    /// CreateBranchFrom creates it inside the worktree exactly as it would in the main
+    /// tree (creating it here instead would trip Prepare's branch-without-evidence guard).</summary>
+    public void AddWorktreeDetached(string path, string commitish)
+    {
+        GitProcess.Run(RepoRoot, ["worktree", "add", "--detach", path, commitish]);
+    }
+
+    /// <summary>Adds a worktree with the existing <paramref name="branch"/> checked out —
+    /// the re-attempt shape. Git itself refuses when the branch is checked out anywhere
+    /// else (including the main tree), which is the structural guard against two trees
+    /// mutating one branch.</summary>
+    public void AddWorktreeForBranch(string path, string branch)
+    {
+        GitProcess.Run(RepoRoot, ["worktree", "add", path, branch]);
+    }
+
+    /// <summary>Removes a linked worktree. Deliberately no <c>--force</c>: git refuses a
+    /// dirty worktree, so undecided work can never be swept away by cleanup — the caller
+    /// keeps the tree and tells the human where it lives instead.</summary>
+    public void RemoveWorktree(string path)
+    {
+        GitProcess.Run(RepoRoot, ["worktree", "remove", path]);
+    }
 }

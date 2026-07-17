@@ -58,12 +58,16 @@ public sealed class CheckpointVerifier(
     OrcaConfig config,
     GitWorkspace workspace,
     IClaudeExecutor executor,
-    TimeProvider? clock = null)
+    TimeProvider? clock = null,
+    string? stateRepoRoot = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly VaultLayout _layout = new(config.VaultRoot, config.PlansDir);
-    private readonly RunLogLayout _logLayout = new(workspace.RepoRoot);
-    private readonly RunStateStore _stateStore = new(workspace.RepoRoot);
+    // SUG-03 stage B: gates and judges run against the workspace (possibly a worktree),
+    // but logs/state anchor to the repo that owns .orca/ — see CheckpointRunner.
+    private readonly string _stateRepoRoot = stateRepoRoot ?? workspace.RepoRoot;
+    private readonly RunLogLayout _logLayout = new(stateRepoRoot ?? workspace.RepoRoot);
+    private readonly RunStateStore _stateStore = new(stateRepoRoot ?? workspace.RepoRoot);
 
     public bool HasRecord(string planId, string checkpointId, int attempt) =>
         File.Exists(_layout.VerificationFile(planId, checkpointId, attempt));
@@ -382,7 +386,9 @@ public sealed class CheckpointVerifier(
 
     private void AppendGateLine(System.Text.StringBuilder sb, GateCommandResult gate)
     {
-        var log = Path.GetRelativePath(workspace.RepoRoot, gate.OutputPath).Replace('\\', '/');
+        // Relative to the repo that owns .orca/ — in a worktree run that is the main
+        // repo, so the record's pointer stays valid after the worktree is removed.
+        var log = Path.GetRelativePath(_stateRepoRoot, gate.OutputPath).Replace('\\', '/');
         var detail = gate.TimedOut
             ? $"killed after {gate.Elapsed.TotalSeconds:0.0}s — timeout"
             : $"exit {gate.ExitCode}, {gate.Elapsed.TotalSeconds:0.0}s";
