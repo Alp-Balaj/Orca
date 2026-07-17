@@ -10,6 +10,7 @@
          hash is of this embedded content. -->
     <EmbeddedResource Include="../../prompts/planner.md" LogicalName="Orca.Core.Prompts.planner.md" />
     <EmbeddedResource Include="../../prompts/reconciler.md" LogicalName="Orca.Core.Prompts.reconciler.md" />
+    <EmbeddedResource Include="../../prompts/scout.md" LogicalName="Orca.Core.Prompts.scout.md" />
     <EmbeddedResource Include="../../prompts/verifier.md" LogicalName="Orca.Core.Prompts.verifier.md" />
   </ItemGroup>
 

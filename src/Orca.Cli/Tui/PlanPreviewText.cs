@@ -20,6 +20,10 @@ internal static class PlanPreviewText
 
         Fact(lines, "plan", preview.Request.PlanId);
         Fact(lines, "strategy", "single_candidate");
+        // SUG-01: the Scout stage is part of what the human authorizes — show it.
+        Fact(lines, "scout", preview.Scout is { } scout
+            ? $"runs first (attempt {scout.Attempt}, model {scout.Options.Model ?? "CLI default"})"
+            : preview.ScoutSkipReason ?? "(skipped)");
         Fact(lines, "attempt", preview.Attempt.ToString());
         Fact(lines, "plan file", preview.PlanFilePath);
         Fact(lines, "writes (rel)", preview.RelativePlanPath);

@@ -99,6 +99,23 @@ public static class OrcaConfigScaffold
                     model = "sonnet",
                     maxBudgetUsd = 2,
                 },
+                // SUG-01: the repo auditor that grounds the Planner. Read-only against
+                // the repo by convention and by prompt; Write is in the list solely for
+                // the one audit file it writes into the vault (CLI 2.1.201 cannot
+                // path-scope a Write rule — the post-run clean-tree check is the
+                // structural guard). Remove this block to plan goal-only.
+                scout = new
+                {
+                    allowedTools = new[]
+                    {
+                        "Read", "Glob", "Grep", "Write",
+                        "Bash(git log*)", "Bash(git diff*)",
+                    },
+                    maxTurns = 40,
+                    timeoutSeconds = 900,
+                    model = "sonnet",
+                    maxBudgetUsd = 2,
+                },
             },
         };
 

@@ -8,6 +8,9 @@ public enum RoleName
     Implementer,
     Reconciler,
     Verifier,
+    /// <summary>SUG-01: the read-only repo auditor that grounds the Planner. Optional —
+    /// a repo without <c>roles.scout</c> plans goal-only, exactly as before.</summary>
+    Scout,
 }
 
 /// <summary>The merged, resolved configuration one run works from: target-repo
@@ -75,6 +78,7 @@ public sealed record OrcaConfig
             RoleName.Implementer => RoleSections.Implementer,
             RoleName.Reconciler => RoleSections.Reconciler,
             RoleName.Verifier => RoleSections.Verifier,
+            RoleName.Scout => RoleSections.Scout,
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
         };
 
@@ -111,6 +115,7 @@ public sealed record OrcaConfig
         RoleName.Implementer => "implementer",
         RoleName.Reconciler => "reconciler",
         RoleName.Verifier => "verifier",
+        RoleName.Scout => "scout",
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
     };
 }

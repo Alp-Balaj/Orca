@@ -58,14 +58,19 @@ public sealed record PlanningSection
     public int? Candidates { get; init; }
 }
 
-/// <summary>The four roles, fixed by spec §8 — a record rather than a dictionary so an
-/// unknown role name fails the parse instead of riding along silently.</summary>
+/// <summary>The roles, fixed by spec §8 (plus SUG-01's optional Scout) — a record rather
+/// than a dictionary so an unknown role name fails the parse instead of riding along
+/// silently.</summary>
 public sealed record RolesSection
 {
     public RoleSection? Planner { get; init; }
     public RoleSection? Implementer { get; init; }
     public RoleSection? Reconciler { get; init; }
     public RoleSection? Verifier { get; init; }
+
+    /// <summary>SUG-01: optional — absent means plan-generate runs goal-only, exactly as
+    /// before the Scout existed.</summary>
+    public RoleSection? Scout { get; init; }
 }
 
 /// <summary>Per-role executor settings; maps 1:1 onto <c>ClaudeInvocationOptions</c>.

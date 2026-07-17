@@ -282,7 +282,8 @@ record from machine facts alone and spends nothing on the LLM roles.
 
     orca plan-init <plan-id> --title <title> [--base-branch main] [--repo <path>]
     orca plan-generate <plan-id> (--goal <text> | --goal-file <path>) [--title <t>]
-                       [--base-branch main] [--strategy single|multi] [--dry-run] [--repo <path>]
+                       [--base-branch main] [--strategy single|multi] [--no-scout]
+                       [--dry-run] [--repo <path>]
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
     orca plan-approve [<plan-id>] [--revert] [--repo <path>]
     orca checkpoint-complete <checkpoint-id> [--plan <id>] [--reopen] [--anyway] [--repo <path>]
@@ -326,6 +327,19 @@ the vault as the memory. `maxCheckpointAttempts` caps those retries; the ceiling
 at prepare time, before anything is spent. An interrupted pipeline (rate limit, auth
 expiry) resumes on the next `checkpoint-run`: sub-steps whose records already exist are
 never re-paid.
+
+When `roles.scout` is configured, `plan-generate` first runs the **Scout** (SUG-01): a
+read-only `claude -p` invocation with the *target repository* as its working directory
+(`Read`/`Glob`/`Grep`/`git log`/`git diff`), which writes exactly one file into the
+vault — `<plansDir>/<plan-id>/<plan-id>.audit.md`, strict frontmatter plus five
+contracted sections (verified current state, key files and patterns, dependencies,
+risks, suggested checkpoint boundaries). The audit is a durable, reviewable artifact:
+correct it by hand and re-run to plan from the corrected version (an existing valid
+audit is reused, never re-paid), or pass `--no-scout` to plan goal-only. The repo is
+enforced read-only by a tree-fingerprint check — a Scout that modifies the repository
+fails the run loudly. The Planner then receives the audit body, fenced, in its prompt:
+grounded facts instead of assumptions, which is exactly the judgment-heavy step manual
+planning did by hand.
 
 `plan-generate` runs the Planner: one `claude -p` invocation, working directory = the
 vault, scoped by `roles.planner`, that must write a schema-valid **draft** plan file
