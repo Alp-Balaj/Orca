@@ -14,6 +14,9 @@ public enum RoleName
     /// <summary>SUG-08: the goal-refinement interviewer behind <c>orca goal</c>.
     /// Optional — a repo without <c>roles.interviewer</c> just can't run that command.</summary>
     Interviewer,
+    /// <summary>SUG-09: the post-approve session-note distiller. Optional — a repo
+    /// without <c>roles.summarizer</c> simply never offers the note.</summary>
+    Summarizer,
 }
 
 /// <summary>The merged, resolved configuration one run works from: target-repo
@@ -93,6 +96,7 @@ public sealed record OrcaConfig
             RoleName.Verifier => RoleSections.Verifier,
             RoleName.Scout => RoleSections.Scout,
             RoleName.Interviewer => RoleSections.Interviewer,
+            RoleName.Summarizer => RoleSections.Summarizer,
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
         };
 
@@ -138,6 +142,7 @@ public sealed record OrcaConfig
         RoleName.Verifier => "verifier",
         RoleName.Scout => "scout",
         RoleName.Interviewer => "interviewer",
+        RoleName.Summarizer => "summarizer",
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "unknown role"),
     };
 }

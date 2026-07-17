@@ -258,6 +258,15 @@ verdicts, the working-tree diffstat, and the decision prompt:
 - **Defer** — leave everything; the next `checkpoint-run` detects the undecided attempt
   and comes straight back to this prompt without re-invoking anything.
 
+**3b. (Optional) Distill the knowledge.** Right after an Approve, if `roles.summarizer`
+is configured, the CLI offers "write a session note?" (SUG-09): one haiku-tier
+invocation reads a deterministically filtered transcript excerpt (assistant prose and
+tool errors only — never payloads), the verification record, and the commit summary,
+and writes `Sessions/<date>-<plan>-<checkpoint>.md` beside the plans directory —
+validated fail-loud, capped at 80 body lines (the vault is knowledge, not logs). It may
+conservatively propose at most one `Decisions/` draft for you to keep or delete. A
+summarizer failure only warns; the approval is never affected.
+
 **4. Check where things stand** any time: `orca status --repo <repo>` — plan,
 checkpoints, latest verification verdict, accumulated cost, and the **ready set**
 ("runnable now: …"): every pending checkpoint whose dependencies are complete. A

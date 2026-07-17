@@ -85,6 +85,9 @@ public sealed record RolesSection
     /// <summary>SUG-08: optional — absent means `orca goal` refuses with a clear
     /// message; every other command is unaffected.</summary>
     public RoleSection? Interviewer { get; init; }
+    /// <summary>SUG-09: optional — absent means the post-approve session-note offer
+    /// never appears; every other command is unaffected.</summary>
+    public RoleSection? Summarizer { get; init; }
 }
 
 /// <summary>Per-role executor settings; maps 1:1 onto <c>ClaudeInvocationOptions</c>.

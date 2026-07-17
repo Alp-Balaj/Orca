@@ -86,6 +86,11 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
             if (result.Outcome != CheckpointSessionOutcome.Approved || !interactive)
                 return exitCode;
 
+            // SUG-09: the knowledge-distillation offer, at the moment the knowledge is
+            // proven worth keeping. Optional, cheap, and a failure never sours the
+            // approval.
+            await OfferSessionNoteAsync(config, workspace, result);
+
             var next = session.ChainCandidate(result.Preview);
             if (next is null || !AnsiConsole.Confirm(
                 $"next: '{next.Id.EscapeMarkup()}' — {next.Description.EscapeMarkup()}. Run it now?"))
@@ -105,6 +110,32 @@ public sealed class CheckpointRunCommand : AsyncCommand<CheckpointRunCommand.Set
             planId = result.Preview.Plan.PlanId;
             checkpointId = next.Id;
         }
+    }
+
+    private static async Task OfferSessionNoteAsync(
+        Orca.Core.Config.OrcaConfig config, GitWorkspace workspace, CheckpointSessionResult result)
+    {
+        var summarizer = new SessionSummarizer(config, new ClaudeCodeExecutor(), workspace.RepoRoot);
+        if (!summarizer.IsConfigured)
+            return;
+
+        if (!AnsiConsole.Prompt(new ConfirmationPrompt(
+                "Write a session note from this run's evidence (one haiku-tier invocation, cents)?")))
+            return;
+
+        var decidedAttempt = result.Verification?.Record?.Attempt ?? result.Preview.Attempt;
+        var commitSummary = result.CommitSha is { } sha
+            ? $"{sha[..12]} — {workspace.CommitSubject(sha) ?? "(subject unavailable)"}"
+            : null;
+
+        var outcome = await summarizer.WriteSessionNoteAsync(
+            result.Preview, decidedAttempt, commitSummary, DateTimeOffset.UtcNow);
+
+        if (outcome.NotePath is { } path)
+            AnsiConsole.MarkupLine($"[green]session note written:[/] {path.EscapeMarkup()}" +
+                (outcome.CostUsd > 0 ? $" (${outcome.CostUsd:0.00})" : ""));
+        else
+            AnsiConsole.MarkupLine($"[yellow]{outcome.FailureDetail!.EscapeMarkup()}[/]");
     }
 
     internal static int Render(CheckpointSessionResult result, SpectreCheckpointGate gate)

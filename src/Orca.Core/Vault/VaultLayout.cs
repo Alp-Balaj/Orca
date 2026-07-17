@@ -44,6 +44,18 @@ public sealed class VaultLayout
     /// will seed.</summary>
     public string GoalFile(string planId) =>
         Path.Combine(PlanDirectory(planId), ValidatePlanId(planId) + ".goal.md");
+    /// <summary>SUG-09: session notes live beside the plans directory, matching the
+    /// vault's own Sessions/ convention.</summary>
+    public string SessionsDirectory() =>
+        Path.Combine(Path.GetDirectoryName(PlansRoot)!, "Sessions");
+
+    public string SessionFile(DateTimeOffset date, string planId, string checkpointId) =>
+        Path.Combine(SessionsDirectory(),
+            $"{date:yyyy-MM-dd}-{ValidatePlanId(planId)}-{ValidateCheckpointId(checkpointId)}.md");
+
+    /// <summary>SUG-09: decision-note drafts land here for the human to keep/edit/delete.</summary>
+    public string DecisionsDirectory() =>
+        Path.Combine(Path.GetDirectoryName(PlansRoot)!, "Decisions");
 
     public string ChildNoteFile(string planId, string checkpointId) =>
         Path.Combine(PlanDirectory(planId), ValidateCheckpointId(checkpointId) + ".md");

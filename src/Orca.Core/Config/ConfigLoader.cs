@@ -102,6 +102,7 @@ public static class ConfigLoader
         Verifier = MergeRole(global?.Verifier, repo?.Verifier),
         Scout = MergeRole(global?.Scout, repo?.Scout),
         Interviewer = MergeRole(global?.Interviewer, repo?.Interviewer),
+        Summarizer = MergeRole(global?.Summarizer, repo?.Summarizer),
     };
 
     private static RoleSection? MergeRole(RoleSection? global, RoleSection? repo)
@@ -236,6 +237,7 @@ public static class ConfigLoader
         yield return ("verifier", roles.Verifier);
         yield return ("scout", roles.Scout);
         yield return ("interviewer", roles.Interviewer);
+        yield return ("summarizer", roles.Summarizer);
     }
 
     /// <summary>Shape validation for whatever fields a role block does declare; block
