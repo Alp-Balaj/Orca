@@ -292,7 +292,10 @@ internal static class TuiText
         return string.IsNullOrEmpty(name) ? ShortenHome(vaultRoot) : name;
     }
 
-    private static string Money(decimal usd) => "$" + usd.ToString("0.00", CultureInfo.InvariantCulture);
+    // BF-17: sub-cent runs used to render as $0.00 — real spend hidden as zero.
+    private static string Money(decimal usd) => "$" + (usd > 0m && usd < 0.01m
+        ? usd.ToString("0.000####", CultureInfo.InvariantCulture)
+        : usd.ToString("0.00", CultureInfo.InvariantCulture));
 
     private static TuiRole RoleFor(TuiNodeStatus status) => status switch
     {

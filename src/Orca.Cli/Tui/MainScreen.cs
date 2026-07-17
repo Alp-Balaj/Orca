@@ -198,22 +198,24 @@ internal sealed class MainScreen : Window
 
     private void OnKey(object? sender, Key key)
     {
-        if (key == Key.Q || key == Key.Esc || key == Key.Q.WithCtrl)
+        // BF-17: shifted letters (Caps-Lock, habit) must behave like their lowercase
+        // selves — a shell that ignores 'Q' looks broken.
+        if (key == Key.Q || key == Key.Q.WithShift || key == Key.Esc || key == Key.Q.WithCtrl)
         {
             Application.RequestStop();
             key.Handled = true;
         }
-        else if (key == Key.R || key == Key.F5)
+        else if (key == Key.R || key == Key.R.WithShift || key == Key.F5)
         {
             Refresh();
             key.Handled = true;
         }
-        else if (key == Key.X)
+        else if (key == Key.X || key == Key.X.WithShift)
         {
             RunSelectedCheckpoint();
             key.Handled = true;
         }
-        else if (key == Key.G)
+        else if (key == Key.G || key == Key.G.WithShift)
         {
             GeneratePlan();
             key.Handled = true;

@@ -9,7 +9,10 @@ namespace Orca.Core.Git;
 /// smarter than a process spawn).</summary>
 internal static class GitProcess
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
+    // BF-17: 60s was too short for huge repos/LFS hooks on `git add -A`, and a
+    // mid-write kill can leave .git/index.lock behind — five minutes is generous
+    // headroom while still catching a genuinely hung git.
+    private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(5);
 
     internal sealed record Result(int ExitCode, string Stdout, string Stderr);
 

@@ -57,6 +57,10 @@ internal static class CheckpointRenderer
             table.AddRow("cost", $"${r.TotalCostUsd}");
             table.AddRow("tokens in/out", $"{r.Usage.InputTokens}/{r.Usage.OutputTokens}");
         }
+        // BF-17: on failure, name the captured stderr — it existed all along and no
+        // message ever pointed at it.
+        if (e.StopReason != InvocationStopReason.Succeeded)
+            table.AddRow("stderr", outcome.Preview.LogPaths.Stderr.EscapeMarkup());
         table.AddRow("session", (e.SessionId ?? "(none)").EscapeMarkup());
         table.AddRow("accumulated cost", $"${outcome.RunState.AccumulatedCostUsd}");
         AnsiConsole.Write(new Panel(table).Header("invocation result"));

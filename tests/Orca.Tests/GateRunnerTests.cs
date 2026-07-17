@@ -129,4 +129,18 @@ public sealed class GateRunnerTests : IDisposable
 
         Assert.Contains("commands.build", ex.Message);
     }
+
+    [Fact]
+    public void The_tail_keeps_the_LAST_sixty_lines_not_the_first()
+    {
+        // BF-17: nothing pinned the direction — a first-N regression would hand the
+        // Verifier the wrong excerpt (the interesting failures are at the end).
+        var runner = new GateRunner(timeout: null);
+
+        var result = runner.Run("build", NumberedLinesScript(100), _dir, OutputPath("tail"));
+
+        Assert.DoesNotContain("line-1\n", result.OutputTail + "\n");
+        Assert.Contains("line-41", result.OutputTail);
+        Assert.Contains("line-100", result.OutputTail);
+    }
 }

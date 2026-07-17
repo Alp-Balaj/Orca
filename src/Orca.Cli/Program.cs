@@ -20,7 +20,7 @@ app.Configure(config =>
     config.AddCommand<StatusCommand>("status")
         .WithDescription("Show the plan's checkpoints and the current run state.");
     config.AddCommand<UiCommand>("ui")
-        .WithDescription("Open the full-screen, read-only status TUI (also opened by bare `orca` on an interactive terminal).");
+        .WithDescription("Open the full-screen TUI — runs checkpoints and generates plans, a human at every gate (also opened by bare `orca` on an interactive terminal).");
 });
 
 try

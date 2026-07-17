@@ -60,7 +60,14 @@ public static class RunStateSerializer
 
     public static string ToJson(RunState state) => JsonSerializer.Serialize(state, Options);
 
-    public static RunState FromJson(string json) =>
-        JsonSerializer.Deserialize<RunState>(json, Options)
-        ?? throw new JsonException("run state JSON deserialized to null");
+    public static RunState FromJson(string json)
+    {
+        var state = JsonSerializer.Deserialize<RunState>(json, Options)
+            ?? throw new JsonException("run state JSON deserialized to null");
+        // BF-17: the version was written but never checked on read.
+        if (state.SchemaVersion != 1)
+            throw new JsonException(
+                $"unsupported run-state schemaVersion {state.SchemaVersion}; this build of Orca supports version 1");
+        return state;
+    }
 }

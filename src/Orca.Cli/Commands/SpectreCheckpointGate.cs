@@ -50,8 +50,10 @@ internal sealed class SpectreCheckpointGate(bool interactive) : ICheckpointGate
         if (!interactive)
             return Task.FromResult(false);
 
+        // BF-17: bare Enter must not spend quota — explicit consent, like the TUI twin.
         return Task.FromResult(AnsiConsole.Prompt(new ConfirmationPrompt(
-            $"Attempt {pendingAttempt} has not been verified — run gates + reconcile + verify now?")));
+                $"Attempt {pendingAttempt} has not been verified — run gates + reconcile + verify now?")
+            { DefaultValue = false }));
     }
 
     public Task<CheckpointDecision> DecideAsync(CheckpointDecisionContext context, CancellationToken ct)
