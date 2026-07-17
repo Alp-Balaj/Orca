@@ -450,6 +450,12 @@ internal sealed class MainScreen : Window
 
         var result = RunScreen.Run(session, preview);
 
+        // SUG-07: a decision refreshes the cockpit note. Silent on failure by design —
+        // the dashboard is a convenience view; the TUI itself shows the live truth.
+        if (result?.Outcome is CheckpointSessionOutcome.Approved
+            or CheckpointSessionOutcome.Rejected or CheckpointSessionOutcome.Deferred)
+            DashboardWriter.TryWrite(_config, _workspace, out _);
+
         // SUG-16 proposal A, TUI lane: after an Approve, offer the plan's next pending
         // checkpoint in this same session. The offer modal doubles as the
         // authorize-the-spend moment for the chained attempt (the CLI's confirm plays the

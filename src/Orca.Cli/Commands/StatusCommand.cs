@@ -29,6 +29,9 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         [CommandOption("--tokens")]
         [Description("Also show accumulated token usage by role — where the spend actually goes (SUG-06).")]
         public bool Tokens { get; init; }
+        [CommandOption("--write-dashboard")]
+        [Description("Also regenerate the vault's Dashboard.md from current evidence (SUG-07).")]
+        public bool WriteDashboard { get; init; }
     }
 
     public override int Execute(CommandContext context, Settings settings)
@@ -80,6 +83,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
         if (state is null)
         {
             AnsiConsole.MarkupLine("no runs yet — [bold]orca checkpoint-run[/] starts the first pending checkpoint.");
+            if (settings.WriteDashboard)
+                WriteDashboardNote(config, workspace);
             return 0;
         }
 
@@ -106,6 +111,8 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
 
         if (settings.Tokens)
             RenderTokens(state, new PlanningStateStore(workspace.RepoRoot).Read(planId));
+        if (settings.WriteDashboard)
+            WriteDashboardNote(config, workspace);
 
         return 0;
     }
@@ -149,6 +156,14 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
             usage.CacheCreationInputTokens.ToString("N0"),
             usage.CacheReadInputTokens.ToString("N0"),
             hit);
+    }
+
+    private static void WriteDashboardNote(OrcaConfig config, GitWorkspace workspace)
+    {
+        if (DashboardWriter.TryWrite(config, workspace, out var warning) is { } path)
+            AnsiConsole.MarkupLine($"[green]dashboard updated:[/] {path.EscapeMarkup()}");
+        else
+            AnsiConsole.MarkupLine($"[yellow]{warning!.EscapeMarkup()}[/]");
     }
 
     private static string SchemaYaml(GateOutcome outcome) =>

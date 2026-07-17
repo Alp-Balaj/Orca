@@ -274,6 +274,15 @@ Run state accumulates usage per role instead of letting the last invocation win,
 the session id / "last usage" fields are the Implementer's, never clobbered by a judge
 invocation (BF-07). An optional `maxPromptBytes` in orca.json refuses an oversized
 prompt at prepare time — before it is billed — for both checkpoint runs and planning.
+The same evidence also
+renders as a vault note: `Dashboard.md`, a sibling of the plans directory, regenerated
+automatically after every checkpoint decision (both lanes) and on
+`orca status --write-dashboard` (SUG-07). It carries a focus line (the single next
+action, by urgency), the next-up list, owed loose ends detected from evidence
+(approved-but-unmerged branches, passing verification vs. still-pending status, stale
+drafts), and a per-plan spend table — wikilinked, dataview-friendly, and **generated,
+never authoritative**: the banner says so and a write failure only warns, never blocks
+a run.
 
 Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its own —
 but after an Approve it collapses the gap to one keypress: if the plan still has a
@@ -311,7 +320,7 @@ record from machine facts alone and spends nothing on the LLM roles.
     orca checkpoint-run [--plan <id>] [--checkpoint <id>] [--dry-run] [--repo <path>]
     orca plan-approve [<plan-id>] [--revert] [--repo <path>]
     orca checkpoint-complete <checkpoint-id> [--plan <id>] [--reopen] [--anyway] [--repo <path>]
-    orca status [--plan <id>] [--tokens] [--repo <path>]
+    orca status [--plan <id>] [--tokens] [--write-dashboard] [--repo <path>]
     orca ui [--repo <path>]
     orca                        (no arguments, on an interactive terminal — opens the TUI)
 
