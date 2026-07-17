@@ -366,7 +366,7 @@ public sealed class CheckpointRunner(
     /// <see cref="CheckpointCommitMessage.Build"/> writes for this exact plan/checkpoint —
     /// how the two Prepare guards above recognize a real human approval rather than any
     /// commit that merely happens to sit at a checkpoint branch's head.</summary>
-    private static bool IsApprovalCommit(string? commitSubject, string planId, string checkpointId) =>
+    internal static bool IsApprovalCommit(string? commitSubject, string planId, string checkpointId) =>
         commitSubject is not null
         && commitSubject.StartsWith($"orca: {planId}/{checkpointId} attempt ", StringComparison.Ordinal);
 

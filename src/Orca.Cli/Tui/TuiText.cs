@@ -261,7 +261,7 @@ internal static class TuiText
 
     /// <summary>The key hints, Claude Code style — one faint line, always visible.</summary>
     public static StyledLine Hints() => StyledLine.Plain(
-        "↑↓ navigate · ←→ collapse/expand · x run / approve checkpoint · g generate plan · r refresh · q quit", TuiRole.Faint);
+        "↑↓ navigate · ←→ collapse/expand · x run / approve checkpoint · a approve plan · m mark complete · g generate plan · r refresh · q quit", TuiRole.Faint);
 
     public static string ShortenHome(string path)
     {

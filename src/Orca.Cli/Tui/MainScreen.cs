@@ -1,8 +1,10 @@
 using Orca.Core.Config;
+using Orca.Core.Domain;
 using Orca.Core.Execution;
 using Orca.Core.Git;
 using Orca.Core.Planning;
 using Orca.Core.Run;
+using Orca.Core.Vault;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
@@ -218,6 +220,117 @@ internal sealed class MainScreen : Window
             GeneratePlan();
             key.Handled = true;
         }
+        else if (key == Key.A)
+        {
+            EditSelectedPlanStatus();
+            key.Handled = true;
+        }
+        else if (key == Key.M)
+        {
+            EditSelectedCheckpointStatus();
+            key.Handled = true;
+        }
+    }
+
+    /// <summary>SUG-17: <c>a</c> on a plan node flips draft → approved (or approved back
+    /// to draft) through the surgical frontmatter editor, after an explicit confirm modal
+    /// naming the transition and the file. A human pressing <c>a</c> in a confirm modal is
+    /// exactly as deliberate as typing the status in source mode — the authority is
+    /// identical, only the pen changes; the Planner still can never self-approve. Any
+    /// other plan status is a silent no-op (like <c>x</c> on a plan node).</summary>
+    private void EditSelectedPlanStatus()
+    {
+        if (_tree.SelectedObject is not { Kind: TuiNodeKind.Plan } node)
+            return;
+
+        var plan = node.Plan.Plan;
+        if (plan.Status is not (PlanStatus.Draft or PlanStatus.Approved))
+            return;
+
+        var target = plan.Status == PlanStatus.Draft ? PlanStatus.Approved : PlanStatus.Draft;
+        var path = new VaultLayout(_config.VaultRoot, _config.PlansDir).PlanFile(plan.PlanId);
+
+        var confirmed = TuiModal.Ask(
+            target == PlanStatus.Approved ? "approve plan" : "un-approve plan",
+            StatusEditText.PlanFlip(plan, path, target),
+            new TuiModal.Choice<bool>(Key.Enter,
+                target == PlanStatus.Approved ? "enter approve" : "enter un-approve", true),
+            new TuiModal.Choice<bool>(Key.Esc, "esc cancel", false));
+        if (!confirmed)
+            return;
+
+        ApplyStatusEdit(() => CheckpointStatusEditor.SetPlanStatus(
+            path, plan.Status, target, DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>SUG-17: <c>m</c> on a checkpoint node marks it complete — with the confirm
+    /// modal citing the completion evidence (approval commit / passing verification), or
+    /// warning loudly when there is none — and on an already-complete checkpoint offers
+    /// re-opening it (complete → pending), with the attempt-numbering caveat spelled out.</summary>
+    private void EditSelectedCheckpointStatus()
+    {
+        if (_tree.SelectedObject is not { Kind: TuiNodeKind.Checkpoint } node)
+            return;
+
+        var plan = node.Plan.Plan;
+        var checkpoint = node.Checkpoint!;
+        var layout = new VaultLayout(_config.VaultRoot, _config.PlansDir);
+        var path = layout.PlanFile(plan.PlanId);
+
+        if (checkpoint.Status == CheckpointStatus.Complete)
+        {
+            var reopen = TuiModal.Ask("re-open checkpoint",
+                StatusEditText.Reopen(checkpoint, path),
+                new TuiModal.Choice<bool>(Key.Enter, "enter re-open", true),
+                new TuiModal.Choice<bool>(Key.Esc, "esc cancel", false));
+            if (!reopen)
+                return;
+
+            ApplyStatusEdit(() => CheckpointStatusEditor.SetStatus(
+                path, checkpoint.Id, CheckpointStatus.Complete, CheckpointStatus.Pending,
+                DateTimeOffset.UtcNow));
+            return;
+        }
+
+        var evidence = CompletionEvidence.Probe(
+            _workspace, new VaultReader(layout), plan.PlanId, checkpoint.Id);
+        var confirmed = TuiModal.Ask("mark checkpoint complete",
+            StatusEditText.MarkComplete(checkpoint, path, evidence.Description),
+            new TuiModal.Choice<bool>(Key.Enter,
+                evidence.Any ? "enter mark complete" : "enter mark complete anyway", true),
+            new TuiModal.Choice<bool>(Key.Esc, "esc cancel", false));
+        if (!confirmed)
+            return;
+
+        ApplyStatusEdit(() => CheckpointStatusEditor.SetStatus(
+            path, checkpoint.Id, checkpoint.Status, CheckpointStatus.Complete,
+            DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>Run one surgical status edit and refresh. The editor's own guards do the
+    /// heavy lifting — expected-status mismatch (the file changed since this report was
+    /// built, e.g. Obsidian sync) and parse failures both throw, and land here as an error
+    /// modal telling the human to refresh rather than a crash or a blind overwrite.</summary>
+    private void ApplyStatusEdit(Action edit)
+    {
+        try
+        {
+            edit();
+        }
+        catch (Exception e)
+        {
+            TuiModal.Ask("cannot edit this status",
+                [
+                    StyledLine.Of(new("● ", TuiRole.Error), new(e.Message, TuiRole.Text)),
+                    StyledLine.Empty,
+                    StyledLine.Plain("If the file changed outside this session, press r to refresh and retry.", TuiRole.Dim),
+                ],
+                new TuiModal.Choice<bool>(Key.Enter, "enter back", false),
+                new TuiModal.Choice<bool>(Key.Esc, "esc back", false));
+            return;
+        }
+
+        Refresh();
     }
 
     /// <summary>The plan-generate action (build-order step 7): open the form (item 4a), and on

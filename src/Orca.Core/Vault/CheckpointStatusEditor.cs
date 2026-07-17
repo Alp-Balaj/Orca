@@ -67,6 +67,43 @@ public static class CheckpointStatusEditor
         return filePath;
     }
 
+    /// <summary>Flips the plan's own top-level status (and <c>updated</c>) with no
+    /// checkpoint involved — SUG-17's plan approve/un-approve. Same contract as
+    /// <see cref="SetStatus"/>: validated through <see cref="PlanParser"/> before and
+    /// after the edit, every untouched line carried over byte-for-byte, atomic write.</summary>
+    public static string SetPlanStatus(
+        string filePath,
+        PlanStatus expectedCurrentStatus,
+        PlanStatus newStatus,
+        DateTimeOffset updated)
+    {
+        if (!File.Exists(filePath))
+            throw new VaultException($"plan file not found: {filePath}");
+
+        var originalText = File.ReadAllText(filePath);
+        var plan = PlanParser.Parse(originalText, filePath);
+
+        if (plan.Status != expectedCurrentStatus)
+            throw new VaultException(
+                $"plan '{plan.PlanId}' has status '{SchemaEnums.ToYaml(plan.Status)}' " +
+                $"but caller expected '{SchemaEnums.ToYaml(expectedCurrentStatus)}'");
+
+        var lines = SplitLines(originalText);
+        var frontmatterEnd = FindFrontmatterEnd(lines);
+
+        ReplaceTopLevelValue(lines, frontmatterEnd, "status", SchemaEnums.ToYaml(newStatus));
+        ReplaceTopLevelValue(lines, frontmatterEnd, "updated", FormatTimestamp(updated));
+
+        var editedText = string.Concat(lines.Select(l => l.Content + l.Terminator));
+
+        // Fail loud before touching disk if the surgical edit ever produced something the
+        // real parser refuses.
+        PlanParser.Parse(editedText, filePath);
+
+        WriteAtomic(filePath, editedText);
+        return filePath;
+    }
+
     private static string FormatTimestamp(DateTimeOffset value) =>
         value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture) + "Z";
 

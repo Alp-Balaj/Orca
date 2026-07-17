@@ -164,6 +164,49 @@ public sealed class CheckpointStatusEditorTests : IDisposable
     }
 
     [Fact]
+    public void Plan_status_flip_changes_exactly_the_status_and_updated_lines()
+    {
+        CheckpointStatusEditor.SetPlanStatus(
+            _planPath, PlanStatus.Approved, PlanStatus.Draft, Updated);
+
+        var before = SplitKeepEmpty(PlanText);
+        var after = SplitKeepEmpty(File.ReadAllText(_planPath));
+
+        Assert.Equal(before.Length, after.Length);
+        var changedLines = new List<int>();
+        for (var i = 0; i < before.Length; i++)
+        {
+            if (before[i] != after[i])
+                changedLines.Add(i);
+        }
+
+        Assert.Equal(["status: draft\r", "updated: 2026-07-16T09:30:00Z\r"],
+            changedLines.Select(i => after[i]));
+    }
+
+    [Fact]
+    public void Plan_status_flip_leaves_every_checkpoint_status_untouched()
+    {
+        CheckpointStatusEditor.SetPlanStatus(
+            _planPath, PlanStatus.Approved, PlanStatus.Draft, Updated);
+
+        var plan = PlanParser.Parse(File.ReadAllText(_planPath), _planPath);
+        Assert.Equal(PlanStatus.Draft, plan.Status);
+        Assert.Equal(CheckpointStatus.Complete, plan.Checkpoints[0].Status);
+        Assert.Equal(CheckpointStatus.Pending, plan.Checkpoints[1].Status);
+    }
+
+    [Fact]
+    public void Plan_status_flip_throws_when_the_expected_current_status_does_not_match()
+    {
+        var ex = Assert.Throws<VaultException>(() => CheckpointStatusEditor.SetPlanStatus(
+            _planPath, PlanStatus.Draft, PlanStatus.Approved, Updated));
+
+        Assert.Contains("approved", ex.Message);
+        Assert.Contains("draft", ex.Message);
+    }
+
+    [Fact]
     public void No_temp_file_remains_after_a_successful_edit()
     {
         CheckpointStatusEditor.SetStatus(
