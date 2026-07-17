@@ -25,7 +25,22 @@ public static class StatusReportBuilder
         var plans = new List<PlanStatusEntry>(planIds.Count);
         foreach (var id in planIds)
         {
-            var plan = reader.ReadPlan(id);
+            Plan plan;
+            try
+            {
+                plan = reader.ReadPlan(id);
+            }
+            catch (VaultException e) when (planId is null)
+            {
+                // BF-13/SUG-14 §1: in the all-plans view (the TUI), one malformed plan —
+                // an Obsidian sync artifact, a hand edit, a partially synced file — must
+                // become an error ENTRY, not a crash out of a key handler or a blocked
+                // tree. Single-plan resolution (the subcommands) stays fail-loud: the
+                // guard above only catches when no explicit plan was asked for.
+                plans.Add(PlanStatusEntry.Unparseable(id, e.Message));
+                continue;
+            }
+
             var state = stateStore.Read(id);
 
             // Evidence for every checkpoint the plan declares — plus the run state's
@@ -84,6 +99,26 @@ public sealed record PlanStatusEntry
 
     /// <summary>Checkpoint id → latest vault evidence (either record may be absent).</summary>
     public required IReadOnlyDictionary<string, CheckpointEvidence> Evidence { get; init; }
+
+    /// <summary>Non-null when the plan file did not parse (BF-13): <see cref="Plan"/> is
+    /// then a display-only placeholder — consumers must treat this entry as an error
+    /// node, never as plan truth.</summary>
+    public string? LoadError { get; init; }
+
+    /// <summary>The error entry for a malformed plan file: a placeholder spine (empty
+    /// checkpoints, the folder's id) that exists purely so the tree can render a red
+    /// node naming the reason instead of crashing or blocking.</summary>
+    public static PlanStatusEntry Unparseable(string planId, string reason) => new()
+    {
+        Plan = new Plan(
+            1, planId, 0, "(unparseable)", PlanStatus.Draft, "", "",
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch,
+            new PlanningInfo(PlanningStrategyKind.SingleCandidate, null, null, null),
+            [], ""),
+        RunState = null,
+        Evidence = new Dictionary<string, CheckpointEvidence>(StringComparer.Ordinal),
+        LoadError = reason,
+    };
 }
 
 public sealed record CheckpointEvidence

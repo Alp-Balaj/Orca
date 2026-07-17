@@ -18,6 +18,21 @@ internal static class TuiTreeModel
         var roots = new List<TuiTreeNode>(report.Plans.Count);
         foreach (var entry in report.Plans)
         {
+            // BF-13/SUG-14 §1: a malformed plan file is a red error node, not a blocked
+            // tree or a crash — the detail pane carries the parser's reason.
+            if (entry.LoadError is not null)
+            {
+                roots.Add(new TuiTreeNode
+                {
+                    Label = $"✗ {entry.Plan.PlanId} (unparseable)",
+                    Kind = TuiNodeKind.Plan,
+                    Status = TuiNodeStatus.Failed,
+                    Children = [],
+                    Plan = entry,
+                });
+                continue;
+            }
+
             var currentCheckpointId = entry.RunState?.CheckpointId;
             var children = new List<TuiTreeNode>(entry.Plan.Checkpoints.Count);
             foreach (var checkpoint in entry.Plan.Checkpoints)

@@ -203,4 +203,33 @@ public sealed class StatusReportBuilderTests : IDisposable
             : SemanticVerdict.Fail, verdict == VerificationVerdict.Pass ? null : "not yet")],
         verdict,
         "## Gates\n\n- build: pass\n- tests: pass\n");
+
+    [Fact]
+    public void A_malformed_plan_becomes_an_error_entry_in_the_all_plans_view()
+    {
+        // BF-13: Obsidian sync or a hand edit mid-session must not crash the TUI's
+        // refresh — the malformed plan surfaces as an entry carrying the parser's reason.
+        var dir = Path.Combine(_vault, "Plans", "broken-plan");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "broken-plan.md"), "not a plan at all");
+
+        var report = StatusReportBuilder.Build(Config(), GitWorkspace.Discover(_repo.Root), planId: null);
+
+        var broken = Assert.Single(report.Plans, p => p.Plan.PlanId == "broken-plan");
+        Assert.NotNull(broken.LoadError);
+        Assert.Empty(broken.Plan.Checkpoints);
+        // The healthy plans are untouched.
+        Assert.Contains(report.Plans, p => p.Plan.PlanId == "alpha-plan" && p.LoadError is null);
+    }
+
+    [Fact]
+    public void Single_plan_resolution_stays_fail_loud_on_a_malformed_plan()
+    {
+        var dir = Path.Combine(_vault, "Plans", "broken-plan");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "broken-plan.md"), "not a plan at all");
+
+        Assert.ThrowsAny<VaultException>(() =>
+            StatusReportBuilder.Build(Config(), GitWorkspace.Discover(_repo.Root), "broken-plan"));
+    }
 }

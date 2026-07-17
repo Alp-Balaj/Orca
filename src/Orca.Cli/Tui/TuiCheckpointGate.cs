@@ -25,6 +25,7 @@ internal sealed class TuiCheckpointGate(Action flushPending) : ICheckpointGate
     public Task<bool> ConfirmDiscardAfterFailureAsync(CheckpointDecisionContext context, CancellationToken ct) =>
         OnUiThread(ct, () =>
         {
+            TuiNotify.GateReached($"{context.Preview.Checkpoint.Id} failed — discard partial changes?");
             var body = new List<StyledLine>(RunDecisionText.Describe(context))
             {
                 StyledLine.Empty,
@@ -47,6 +48,7 @@ internal sealed class TuiCheckpointGate(Action flushPending) : ICheckpointGate
                 StyledLine.Empty,
                 StyledLine.Plain("Run gates + reconcile + verify now? This spends quota.", TuiRole.Dim),
             };
+            TuiNotify.GateReached($"attempt {pendingAttempt} awaits verification");
             return TuiModal.Ask($"verify pending attempt {pendingAttempt}?", body,
                 new TuiModal.Choice<bool>(Key.Y, "y verify", true),
                 new TuiModal.Choice<bool>(Key.N, "n skip", false));
@@ -59,6 +61,9 @@ internal sealed class TuiCheckpointGate(Action flushPending) : ICheckpointGate
 
     private static CheckpointDecision Decide(CheckpointDecisionContext context)
     {
+        TuiNotify.GateReached(
+            $"{context.Preview.Checkpoint.Id} ready for review" +
+            (context.AttemptCostUsd is { } cost ? $" (${cost:0.00})" : ""));
         var body = new List<StyledLine>(RunDecisionText.Describe(context));
         // Approve & complete is the default gate choice (SUG-02): enter selects it and c is
         // the silent accelerator (same result, no extra footer hint). "Approve only" keeps

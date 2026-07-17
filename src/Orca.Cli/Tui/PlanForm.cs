@@ -106,8 +106,21 @@ internal static class PlanForm
                 Strategy = strategy.Choice,
             };
 
-            var validation = PlanFormValidation.Validate(
-                fields, p => File.Exists(p) ? File.ReadAllText(p) : null);
+            PlanFormValidationResult validation;
+            try
+            {
+                validation = PlanFormValidation.Validate(
+                    fields, p => File.Exists(p) ? File.ReadAllText(p) : null);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // BF-13 §2: an existing-but-unreadable goal file used to throw out of
+                // the KeyDown handler and crash the whole TUI (exit 134).
+                error.SetLines([StyledLine.Of(
+                    new("● ", TuiRole.Error), new($"goal file unreadable: {e.Message}", TuiRole.Error))]);
+                return;
+            }
+
             if (!validation.Ok)
             {
                 error.SetLines([StyledLine.Of(new("● ", TuiRole.Error), new(validation.Error!, TuiRole.Error))]);

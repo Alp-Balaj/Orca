@@ -177,7 +177,19 @@ internal sealed class RunScreen : Window
         FlushChannel();               // final drain: no observation lost before the outcome
 
         _buffer.AppendLifecycle([StyledLine.Empty]);
-        if (task.IsFaulted)
+        // BF-13 §3: a canceled task must never reach task.Result on the UI thread —
+        // that AggregateException inside Application.Invoke takes down the whole TUI.
+        // Mirrors PlanScreen.OnComplete's defense.
+        if (task.IsCanceled || task.Exception?.GetBaseException() is OperationCanceledException)
+        {
+            SessionResult = null;
+            _buffer.AppendLifecycle(
+            [
+                StyledLine.Of(new("● ", TuiRole.Warning), new("interrupted", TuiRole.Warning)),
+                StyledLine.Plain("re-run to resume; completed sub-steps are not re-paid.", TuiRole.Dim),
+            ]);
+        }
+        else if (task.IsFaulted)
         {
             // ExecuteAsync swallows cancellation into an Interrupted result; a fault here is
             // an unexpected error, surfaced rather than crashing the loop.
