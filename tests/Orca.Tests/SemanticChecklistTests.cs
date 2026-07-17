@@ -147,4 +147,27 @@ public sealed class SemanticChecklistTests
 
         Assert.NotEmpty(checklist.Criteria);
     }
+
+    [Fact]
+    public void An_explicit_null_note_reads_as_no_note_not_a_billed_retry()
+    {
+        // BF-11 §2 (probe-confirmed): 'note: null' / 'note:' is the natural spelling.
+        var text = ValidText.Replace("verdict: pass", "verdict: pass\n    note: null");
+
+        var checklist = Parse(text);
+
+        Assert.Null(checklist.Criteria[0].Note);
+    }
+
+    [Fact]
+    public void Byte_exact_mismatch_errors_visualize_trailing_whitespace()
+    {
+        // BF-11 §3 paper cut: 'ends with space ' vs 'ends with space' rendered
+        // identically to a human.
+        var text = ValidText.Replace("\"Tag entity exists\"", "\"Tag entity exists \"");
+
+        var ex = Assert.Throws<VaultSchemaException>(() => Parse(text));
+
+        Assert.Contains("\u2423", ex.Message);
+    }
 }

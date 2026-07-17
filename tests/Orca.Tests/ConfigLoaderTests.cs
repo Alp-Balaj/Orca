@@ -427,4 +427,30 @@ public sealed class ConfigLoaderTests : IDisposable
         Assert.Contains("contains backslashes", e.Message);
         Assert.Contains("forward slashes", e.Message);
     }
+
+    [Fact]
+    public void An_empty_allowed_tools_list_is_rejected_before_it_can_burn_retries()
+    {
+        // BF-11 §1: [] passed the null check, --safe-mode left the role toolless, and
+        // every invocation burned the whole billed retry budget.
+        var global = WriteGlobalConfig($$"""
+            {
+              "schemaVersion": 1,
+              "vaults": { "brian-the-brain": {{System.Text.Json.JsonSerializer.Serialize(Path.Combine(_root, "vault"))}} }
+            }
+            """);
+        var repoPath = WriteRepoConfig("""
+            {
+              "schemaVersion": 1,
+              "vault": { "name": "brian-the-brain", "plansDir": "Plans" },
+              "commands": { "build": ["b"], "test": ["t"] },
+              "roles": { "planner": { "allowedTools": [], "maxTurns": 5, "timeoutSeconds": 60 } }
+            }
+            """);
+
+        var config = ConfigLoader.Load(repoPath, global);
+        var e = Assert.Throws<ConfigException>(() => config.GetRole(Orca.Core.Config.RoleName.Planner));
+        Assert.Contains("empty allowedTools", e.Message);
+        Assert.Contains("burns billed retries", e.Message);
+    }
 }

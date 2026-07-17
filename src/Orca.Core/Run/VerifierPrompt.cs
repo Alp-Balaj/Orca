@@ -31,9 +31,13 @@ public static class VerifierPrompt
         sb.Append("\n\n## Request\n\n");
         ReconcilerPrompt.AppendIdentity(sb, identity);
         sb.Append($"- write the checklist to this path, relative to your working directory: {relativeStagingPath}\n");
-        sb.Append("\n### Acceptance criteria to judge (copy each byte-exact, in this order)\n\n");
-        for (var i = 0; i < acceptanceCriteria.Count; i++)
-            sb.Append($"{i + 1}. {acceptanceCriteria[i]}\n");
+        sb.Append("- if a file already exists at that path (a crashed earlier run), replace it\n");
+        // BF-11 §3: the model's only work is verdicts and notes — the criterion lines
+        // below are pre-escaped YAML, ready to copy verbatim into the checklist, so a
+        // criterion starting with "1. " or containing quotes can't invite mis-stripping.
+        sb.Append("\n### Acceptance criteria to judge (copy each `criterion:` line verbatim, in this order)\n\n");
+        foreach (var criterion in acceptanceCriteria)
+            sb.Append($"  - criterion: {Orca.Core.Vault.YamlEmit.Quote(criterion)}\n");
         sb.Append("\n## Deterministic gate evidence (both passed)\n\n");
         AppendGate(sb, buildGate);
         AppendGate(sb, testsGate);

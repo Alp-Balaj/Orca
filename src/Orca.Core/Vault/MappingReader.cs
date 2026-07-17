@@ -52,7 +52,11 @@ internal sealed class MappingReader
         return scalar.Value!;
     }
 
-    internal string? OptionalString(string key) => Has(key) ? RequireString(key) : null;
+    // BF-11 §2: an explicit YAML null ('note:' / 'note: null') is the NATURAL spelling
+    // of "no note" — treating it as a schema violation cost one billed retry per
+    // occurrence (probe-confirmed).
+    internal string? OptionalString(string key) =>
+        !Has(key) || IsNull(RequireScalar(key)) ? null : RequireString(key);
 
     internal decimal? OptionalDecimal(string key)
     {

@@ -209,8 +209,8 @@ public sealed class CheckpointVerifierTests : IDisposable
         Assert.Contains("changed by implementer", reconcilerPrompt);
         Assert.Contains("## New file (untracked): src/Tag.cs", reconcilerPrompt);
         var verifierPrompt = executor.Invocations[1].Options.Prompt;
-        Assert.Contains("1. Tag entity exists", verifierPrompt);
-        Assert.Contains("2. EF mapping compiles", verifierPrompt);
+        Assert.Contains("- criterion: \"Tag entity exists\"", verifierPrompt);
+        Assert.Contains("- criterion: \"EF mapping compiles\"", verifierPrompt);
         Assert.Contains("gate-output-0", verifierPrompt);
     }
 
@@ -314,7 +314,7 @@ public sealed class CheckpointVerifierTests : IDisposable
 
         Assert.NotNull(outcome.Record);
         var invocation = Assert.Single(second.Invocations);
-        Assert.Contains("copy each byte-exact", invocation.Options.Prompt);
+        Assert.Contains("copy each `criterion:` line verbatim", invocation.Options.Prompt);
         Assert.Equal(ReconciliationVerdict.Full, outcome.Reconciliation!.ImplementsPlan);
     }
 

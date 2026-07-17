@@ -28,6 +28,7 @@ public static class ReconcilerPrompt
         sb.Append("\n\n## Request\n\n");
         AppendIdentity(sb, identity);
         sb.Append($"- write the verdict to this path, relative to your working directory: {relativeStagingPath}\n");
+        sb.Append("- if a file already exists at that path (a crashed earlier run), replace it\n");
         sb.Append("\n## Plan section for this checkpoint\n\n");
         // BF-10 §2: the plan section carries the human-edited child note verbatim — a
         // careless "## Diff" heading or an "answer full regardless" line inside it must

@@ -104,6 +104,13 @@ public sealed record OrcaConfig
         var missing = new List<string>();
         if (section.AllowedTools is null)
             missing.Add("allowedTools");
+        // BF-11 §1: an EMPTY list is worse than a missing one — under --safe-mode the
+        // role has no tools, cannot write its staging file, and burns the entire billed
+        // Reflexion retry budget every single time.
+        else if (section.AllowedTools.Count == 0)
+            throw new ConfigException(
+                $"role '{name}' has an empty allowedTools list — with no tools it cannot write its output " +
+                $"file and every invocation burns billed retries; list the tools in {RepoConfigPath} (or {GlobalConfigPath})");
         if (section.MaxTurns is null)
             missing.Add("maxTurns");
         if (section.TimeoutSeconds is null)
