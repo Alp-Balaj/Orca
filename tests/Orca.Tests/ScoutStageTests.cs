@@ -192,7 +192,21 @@ public sealed class ScoutStageTests : IDisposable
     {
         var executor = new FakeExecutor();
         executor.Enqueue(FakeExecutor.Success, () => WriteVaultFile(AuditPath, AuditText));
-        executor.Enqueue(FakeExecutor.Success, () => WriteVaultFile(PlanPath, ValidPlanText()));
+        executor.Enqueue(FakeExecutor.Success, () =>
+        {
+            WriteVaultFile(PlanPath, ValidPlanText());
+            // SUG-04 contract v2: the Planner also ships one child note per checkpoint.
+            WriteVaultFile(Path.Combine(Path.GetDirectoryName(PlanPath)!, "01-tag-entity.md"),
+                """
+                ---
+                schema_version: 1
+                plan_id: recipe-tagging
+                checkpoint_id: 01-tag-entity
+                ---
+
+                Brief.
+                """);
+        });
         var strategy = Strategy(executor);
 
         var outcome = await strategy.GenerateAsync(strategy.Prepare(Request()));
