@@ -40,6 +40,9 @@ public static class ConfigLoader
             : new ConfigDocument { SchemaVersion = 1 };
 
         var repo = ConfigDocumentParser.Parse(File.ReadAllText(repoPath), repoPath);
+        if (repo.Tui is not null)
+            throw new ConfigException(
+                $"{repoPath}: 'tui' is a machine/user preference and belongs only in the global config ({globalConfigPath}) — a committed {RepoFileName} must not impose a theme");
         if (repo.Vaults is not null)
             throw new ConfigException(
                 $"{repoPath}: 'vaults' is machine-local and belongs only in the global config ({globalConfigPath}) — a committed {RepoFileName} must never carry machine paths; name the vault via vault.name instead");
@@ -63,6 +66,7 @@ public static class ConfigLoader
         DeniedTools = UnionDeniedTools(global.DeniedTools, repo.DeniedTools),
         Roles = MergeRoles(global.Roles, repo.Roles),
         Vaults = global.Vaults,
+        Tui = global.Tui,
         ClaudeVersionPolicy = repo.ClaudeVersionPolicy ?? global.ClaudeVersionPolicy,
     };
 
@@ -163,6 +167,13 @@ public static class ConfigLoader
 
         var claudeVersionPolicy = ParseClaudeVersionPolicy(merged.ClaudeVersionPolicy, repoPath, globalPath);
 
+        // SUG-18: validate the theme name at load, where every other config refusal
+        // lives — the TUI resolves the same names at startup.
+        var tuiTheme = merged.Tui?.Theme;
+        if (tuiTheme is not (null or "" or "dark" or "light" or "high-contrast" or "terminal"))
+            throw new ConfigException(
+                $"{globalPath}: tui.theme '{tuiTheme}' is not a built-in — use dark, light, high-contrast, or terminal");
+
         return new OrcaConfig
         {
             RepoConfigPath = repoPath,
@@ -181,6 +192,7 @@ public static class ConfigLoader
             DeniedTools = denied,
             RoleSections = roles,
             ClaudeVersionPolicy = claudeVersionPolicy,
+            TuiTheme = tuiTheme,
         };
     }
 

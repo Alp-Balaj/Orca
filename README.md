@@ -72,7 +72,10 @@ a human at every gate. Three parts:
   Obsidian — the TUI never approves a plan.
 
 The TUI is `Orca.Cli` only (Terminal.Gui 2.4.17, pinned above); `Orca.Core` and every
-subcommand's output are unchanged.
+subcommand's output are unchanged. Theme it via the GLOBAL config (a machine preference,
+never a repo property): `"tui": { "theme": "dark" | "light" | "high-contrast" |
+"terminal" }` — `terminal` uses only the terminal's own 16 ANSI colours, so Orca
+inherits whatever theme your terminal (and OS theme switcher) runs (SUG-18).
 
 ### Prerequisites
 

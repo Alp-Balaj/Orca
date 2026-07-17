@@ -64,6 +64,11 @@ public sealed record OrcaConfig
     /// config file gets.</summary>
     public ClaudeVersionPolicy ClaudeVersionPolicy { get; init; } = ClaudeVersionPolicy.Warn;
 
+    /// <summary>SUG-18: the GLOBAL config's tui.theme (dark/light/high-contrast/
+    /// terminal); null means the default dark. Not <c>required</c>, same fixture
+    /// rationale as <see cref="ClaudeVersionPolicy"/>.</summary>
+    public string? TuiTheme { get; init; }
+
     /// <summary>The validated executor settings for one role. Throws
     /// <see cref="ConfigException"/> naming every missing field and both files consulted,
     /// so a half-configured role can never launch.</summary>
