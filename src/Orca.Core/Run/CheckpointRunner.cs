@@ -82,6 +82,30 @@ public sealed class CheckpointRunner(
 
         var (checkpoint, index) = SelectCheckpoint(plan, checkpointId);
 
+        // SUG-03 stage A: depends_on is the truth, even for an explicit selection —
+        // running a checkpoint whose dependencies aren't done builds on work that
+        // doesn't exist yet. "Done" here is evidence-aware, matching the rest of this
+        // method: a dependency counts when its plan status says complete OR its branch
+        // head is an Orca approval commit (approved, status flip pending — the unmerged
+        // guard below still speaks to merged-ness). No override: an overstated
+        // dependency is a plan bug to correct, not a wall to climb.
+        if (checkpointId is not null)
+        {
+            var blockers = CheckpointGraph.IncompleteDependencies(plan, checkpoint)
+                .Where(dep =>
+                {
+                    var depBranch = CheckpointBranch.Name(plan.PlanId, dep);
+                    return !(workspace.BranchExists(depBranch)
+                        && IsApprovalCommit(workspace.CommitSubject(depBranch), plan.PlanId, dep));
+                })
+                .ToList();
+            if (blockers.Count > 0)
+                throw new CheckpointRunException(
+                    $"checkpoint '{checkpoint.Id}' depends on {string.Join(", ", blockers.Select(b => $"'{b}'"))}, " +
+                    "not yet complete (no completed status, no approval commit) — run those first, " +
+                    "or correct the plan's depends_on if it overstates the coupling");
+        }
+
         // The Reflexion loop's memory: the latest findings for this checkpoint ride the
         // next attempt's prompt, read from the vault only (spec §8). Each is the latest
         // of its kind — a gate-failed attempt has no reconciliation record. These same
@@ -162,24 +186,28 @@ public sealed class CheckpointRunner(
             }
         }
 
-        // The previous checkpoint (by plan order) may have been approved without its
-        // branch ever being merged into base_branch — this checkpoint would then build on
-        // top of work the base branch doesn't have yet. Warn loudly and require an
-        // explicit override; this is read-only, so nothing here merges on the human's
-        // behalf.
-        if (index > 0 && !overrideUnmergedBase)
+        // A dependency may have been approved without its branch ever being merged into
+        // base_branch — this checkpoint would then build on top of work the base branch
+        // doesn't have yet. Since SUG-03 stage A the guard walks the checkpoint's
+        // EFFECTIVE dependencies (declared depends_on, or the implied previous
+        // checkpoint), so an explicitly parallel checkpoint is never blocked by an
+        // unrelated sibling. Warn loudly and require an explicit override; this is
+        // read-only, so nothing here merges on the human's behalf.
+        if (!overrideUnmergedBase)
         {
-            var previousCheckpoint = plan.Checkpoints[index - 1];
-            var previousBranch = CheckpointBranch.Name(plan.PlanId, previousCheckpoint.Id);
-            if (workspace.BranchExists(previousBranch)
-                && IsApprovalCommit(workspace.CommitSubject(previousBranch), plan.PlanId, previousCheckpoint.Id)
-                && !workspace.IsAncestor(previousBranch, plan.BaseBranch))
+            foreach (var depId in CheckpointGraph.EffectiveDependsOn(plan, checkpoint))
             {
-                throw new CheckpointRunException(
-                    $"checkpoint '{previousCheckpoint.Id}' was approved on '{previousBranch}', but that branch " +
-                    $"is not yet merged into base branch '{plan.BaseBranch}' — this checkpoint would build on " +
-                    $"top of unmerged work. Merge it first: git switch {plan.BaseBranch} && git merge " +
-                    $"{previousBranch} — or pass --override-unmerged-base to proceed anyway.");
+                var depBranch = CheckpointBranch.Name(plan.PlanId, depId);
+                if (workspace.BranchExists(depBranch)
+                    && IsApprovalCommit(workspace.CommitSubject(depBranch), plan.PlanId, depId)
+                    && !workspace.IsAncestor(depBranch, plan.BaseBranch))
+                {
+                    throw new CheckpointRunException(
+                        $"checkpoint '{depId}' was approved on '{depBranch}', but that branch " +
+                        $"is not yet merged into base branch '{plan.BaseBranch}' — this checkpoint would build on " +
+                        $"top of unmerged work. Merge it first: git switch {plan.BaseBranch} && git merge " +
+                        $"{depBranch} — or pass --override-unmerged-base to proceed anyway.");
+                }
             }
         }
 
@@ -391,14 +419,26 @@ public sealed class CheckpointRunner(
             if (checkpoint.Status is not (CheckpointStatus.Pending or CheckpointStatus.InProgress or CheckpointStatus.Rejected))
                 throw new CheckpointRunException(
                     $"checkpoint '{checkpointId}' has status '{SchemaEnums.ToYaml(checkpoint.Status)}' — only pending, in_progress, or rejected checkpoints can run");
+
             return (checkpoint, index);
         }
 
-        for (var i = 0; i < plan.Checkpoints.Count; i++)
+        // Default selection: the first READY pending checkpoint — pending with every
+        // effective dependency complete (SUG-03 stage A) — not merely the first pending.
+        var ready = CheckpointGraph.ReadySet(plan);
+        if (ready.Count > 0)
         {
-            if (plan.Checkpoints[i].Status == CheckpointStatus.Pending)
-                return (plan.Checkpoints[i], i);
+            var first = ready[0];
+            return (first, plan.Checkpoints.ToList().FindIndex(c => c.Id == first.Id));
         }
+
+        var pending = plan.Checkpoints.Where(c => c.Status == CheckpointStatus.Pending).ToList();
+        if (pending.Count > 0)
+            throw new CheckpointRunException(
+                $"plan '{plan.PlanId}' has pending checkpoints but none are ready: " +
+                string.Join("; ", pending.Select(c =>
+                    $"'{c.Id}' waits on {string.Join(", ", CheckpointGraph.IncompleteDependencies(plan, c))}")) +
+                " — complete (and merge) a dependency first");
 
         throw new CheckpointRunException(
             $"plan '{plan.PlanId}' has no pending checkpoints — pass --checkpoint to re-run a specific one");

@@ -48,6 +48,7 @@ checkpoints:
       - <another checkable statement>
     model: opus            # optional — omit unless this checkpoint needs it (see below)
     max_budget_usd: 8       # optional — omit unless this checkpoint needs it (see below)
+    depends_on: [01-slug]   # optional — see the dependency rules below
 ---
 ```
 
@@ -75,6 +76,11 @@ Rules the parser enforces — treat every one as hard:
     non-empty string naming a model tier (e.g. `opus`, `sonnet`, `haiku`).
   - `max_budget_usd` (optional) overrides `roles.implementer.maxBudgetUsd` for this
     checkpoint only — a positive number.
+  - `depends_on` (optional) is the list of checkpoint ids this one requires complete
+    first. Every id must name an **earlier** checkpoint in the list (numbering stays
+    presentation order; `depends_on` is the dependency truth), no duplicates, never the
+    checkpoint itself. Omitted means "depends on the previous checkpoint" — the safe
+    serial default; an explicit `[]` means "no dependencies" (a parallel root).
 - No other keys anywhere in the frontmatter — no `tags`, no `aliases`, nothing beyond the
   fields shown above.
 
@@ -127,6 +133,11 @@ guess.
 - Size each checkpoint for one focused implementation session with a reviewable diff;
   order them by dependency, and put the checkpoint that proves the riskiest assumption or
   contract as early as possible.
+- Mark genuinely independent checkpoints with explicit `depends_on` (including `[]` for
+  parallel roots) so the human can parallelize — Orca shows a "runnable now" set from
+  exactly these edges. Only declare independence you can defend: two checkpoints that
+  touch the same files are not independent, whatever their topics. When every checkpoint
+  really is serial, omit the field everywhere — the default already says that.
 - Acceptance criteria are facts a verifier could check against the diff and the test run —
   "endpoint returns 404 for an unknown tag", not "error handling works well". Three to
   six per checkpoint is the usual weight.

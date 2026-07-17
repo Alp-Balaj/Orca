@@ -725,4 +725,72 @@ public sealed class CheckpointRunnerTests : IDisposable
             });
         }
     }
+
+    // --- SUG-03 stage A: depends_on-aware selection ---
+
+    private void WriteDependencyPlan()
+    {
+        // 01 complete; 02 and 03 are parallel roots off 01; 04 needs both.
+        File.WriteAllText(Path.Combine(_vault, "Plans", "recipe-tagging", "recipe-tagging.md"), """
+            ---
+            schema_version: 1
+            plan_id: recipe-tagging
+            plan_version: 1
+            title: Add tagging to recipes
+            status: approved
+            target_repo: RecipeApp
+            base_branch: main
+            created: 2026-07-06T14:00:00Z
+            updated: 2026-07-06T14:00:00Z
+            planning:
+              strategy: single_candidate
+            checkpoints:
+              - id: 01-tag-entity
+                description: Add Tag entity
+                status: complete
+                acceptance_criteria: [entity exists]
+              - id: 02-endpoints
+                description: CRUD endpoints
+                status: in_progress
+                acceptance_criteria: [endpoints respond]
+                depends_on: [01-tag-entity]
+              - id: 03-social
+                description: Social endpoints
+                status: pending
+                acceptance_criteria: [social responds]
+                depends_on: [01-tag-entity]
+              - id: 04-ui
+                description: Wire the UI
+                status: pending
+                acceptance_criteria: [ui works]
+                depends_on: [02-endpoints, 03-social]
+            ---
+            Plan body.
+            """);
+    }
+
+    [Fact]
+    public void Default_selection_picks_the_first_READY_pending_not_merely_the_first_pending()
+    {
+        WriteDependencyPlan();
+
+        // 03-social is ready (01 complete); 04-ui pends on incomplete 02/03 and must be
+        // skipped over even though the flat order would reach it after 03.
+        var preview = Runner(new FakeExecutor(_repo)).Prepare(null, null);
+
+        Assert.Equal("03-social", preview.Checkpoint.Id);
+    }
+
+    [Fact]
+    public void Explicitly_selecting_a_blocked_checkpoint_names_its_incomplete_dependencies()
+    {
+        WriteDependencyPlan();
+
+        var ex = Assert.Throws<CheckpointRunException>(
+            () => Runner(new FakeExecutor(_repo)).Prepare(null, "04-ui"));
+
+        Assert.Contains("'02-endpoints'", ex.Message);
+        Assert.Contains("'03-social'", ex.Message);
+        Assert.Contains("depends_on", ex.Message);
+    }
 }

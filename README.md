@@ -250,7 +250,16 @@ verdicts, the working-tree diffstat, and the decision prompt:
   and comes straight back to this prompt without re-invoking anything.
 
 **4. Check where things stand** any time: `orca status --repo <repo>` — plan,
-checkpoints, latest verification verdict, accumulated cost.
+checkpoints, latest verification verdict, accumulated cost, and the **ready set**
+("runnable now: …"): every pending checkpoint whose dependencies are complete. A
+checkpoint may declare `depends_on: [ids…]` in the plan frontmatter (SUG-03 stage A) —
+omitted means "the previous checkpoint" (the serial default), `[]` means a parallel
+root, and ids may only point at earlier-listed checkpoints (numbering stays presentation
+order; `depends_on` is the truth). Default checkpoint selection runs the first READY
+pending checkpoint, the unmerged-base guard follows the declared dependencies rather
+than blind list order, and the TUI marks pending checkpoints "ready" or "waits on …".
+Orca still executes one checkpoint at a time — the ready set tells *you* what is safe to
+parallelize across terminals or plans.
 
 Repeat step 3 per checkpoint. Orca never advances to the next checkpoint on its own —
 but after an Approve it collapses the gap to one keypress: if the plan still has a

@@ -128,6 +128,17 @@ internal static class TuiText
         };
         if (node.IsCurrent && node.Plan.RunState is { } state)
             runs.Add(new StyledRun($" · attempt {state.Attempt}", TuiRole.Dim));
+
+        // SUG-03 stage A: a pending checkpoint is either ready (all effective
+        // dependencies complete) or shows exactly what it waits on.
+        if (checkpoint.Status == CheckpointStatus.Pending)
+        {
+            var blockers = CheckpointGraph.IncompleteDependencies(node.Plan.Plan, checkpoint);
+            runs.Add(blockers.Count == 0
+                ? new StyledRun(" · ready", TuiRole.Success)
+                : new StyledRun($" · waits on {string.Join(", ", blockers)}", TuiRole.Warning));
+        }
+
         return new StyledLine(runs);
     }
 

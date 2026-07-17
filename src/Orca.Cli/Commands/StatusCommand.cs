@@ -62,6 +62,16 @@ public sealed class StatusCommand : Command<StatusCommand.Settings>
 
         AnsiConsole.Write(table);
 
+        // SUG-03 stage A: the ready set — what a human can safely start right now.
+        var ready = CheckpointGraph.ReadySet(plan);
+        if (ready.Count > 0)
+            AnsiConsole.MarkupLine(
+                $"runnable now: [bold]{string.Join(", ", ready.Select(c => c.Id)).EscapeMarkup()}[/]" +
+                (ready.Count > 1 ? " — independent per depends_on; parallelize at will (two terminals, worktrees you manage)" : ""));
+        else if (plan.Checkpoints.Any(c => c.Status == CheckpointStatus.Pending))
+            AnsiConsole.MarkupLine(
+                "[yellow]no checkpoint is ready[/] — every pending one waits on an incomplete dependency.");
+
         if (state is null)
         {
             AnsiConsole.MarkupLine("no runs yet — [bold]orca checkpoint-run[/] starts the first pending checkpoint.");
