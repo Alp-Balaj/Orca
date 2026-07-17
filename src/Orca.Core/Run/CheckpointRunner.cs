@@ -51,17 +51,24 @@ public sealed record CheckpointRunOutcome
 /// <summary>Orchestrates exactly one Implementer invocation per call (spec §6 — the
 /// one-invocation-per-checkpoint boundary lives here, not in the executor): clean tree →
 /// checkpoint branch → assembled prompt → executor → run state. Approval and rejection
-/// are separate, human-triggered calls; nothing here loops over checkpoints.</summary>
+/// are separate, human-triggered calls; nothing here loops over checkpoints.
+/// <para><paramref name="stateRepoRoot"/> (SUG-03 stage B): where run state and run logs
+/// anchor. Defaults to the workspace itself — the main-tree shape. A worktree run passes
+/// the MAIN repo root here while <paramref name="workspace"/> points at the worktree, so
+/// every worktree's evidence lands in the one shared <c>.orca/</c> (a worktree's own
+/// <c>.orca/</c> would be deleted with it) and attempt numbering stays coherent across
+/// trees.</para></summary>
 public sealed class CheckpointRunner(
     OrcaConfig config,
     GitWorkspace workspace,
     IClaudeExecutor executor,
-    TimeProvider? clock = null)
+    TimeProvider? clock = null,
+    string? stateRepoRoot = null)
 {
     private readonly TimeProvider _clock = clock ?? TimeProvider.System;
     private readonly VaultLayout _layout = new(config.VaultRoot, config.PlansDir);
-    private readonly RunLogLayout _logLayout = new(workspace.RepoRoot);
-    private readonly RunStateStore _stateStore = new(workspace.RepoRoot);
+    private readonly RunLogLayout _logLayout = new(stateRepoRoot ?? workspace.RepoRoot);
+    private readonly RunStateStore _stateStore = new(stateRepoRoot ?? workspace.RepoRoot);
 
     /// <summary>Read-only planning of the run: resolves plan and checkpoint, computes
     /// attempt number, branch, prompt, and the exact argv. Throws instead of guessing.
