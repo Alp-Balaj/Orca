@@ -9,6 +9,47 @@ checkpoint; nothing runs unattended across checkpoint boundaries.
 
 Orca is a workflow, not an autonomous agent. The full spec is `docs/kickoff-v2.md`.
 
+## Setup
+
+Five steps, once per machine. Fuller detail lives in [Prerequisites](#prerequisites),
+[Install](#install), and [One-time machine setup](#one-time-machine-setup) below.
+
+**1. Install the prerequisites** — [.NET SDK 10.0.x](https://dotnet.microsoft.com/download)
+and Claude Code CLI **2.1.201** (the pinned version), then log in once:
+
+    claude   # /login — a Pro/Max subscription is the only credential Orca uses
+
+**2. Install `orca` on your PATH** — from a clone of this repo:
+
+    dotnet pack src/Orca.Cli -c Release
+    dotnet tool install --global --add-source src/Orca.Cli/bin/Release orca.cli
+
+**3. Point Orca at your Obsidian vault** — create `~/.config/orca/config.json`
+(`%APPDATA%\orca\config.json` on Windows). Any directory of Markdown works as a vault:
+
+    {
+      "schemaVersion": 1,
+      "vaults": { "my-vault": "/absolute/path/to/MyVault" },
+      "deniedTools": [
+        "Bash(git push*)", "Bash(git commit*)", "Bash(git reset*)",
+        "Bash(git checkout*)", "Bash(git switch*)", "Bash(git restore*)",
+        "Bash(git clean*)", "Bash(git rebase*)", "Bash(git merge*)",
+        "Bash(rm*)", "Bash(rmdir*)", "Bash(del *)"
+      ]
+    }
+
+**4. Set up a target repo** — from the root of the git repo you want Orca to work on:
+
+    orca init      # scaffolds orca.json, then stops
+
+Review the `commands.build`/`commands.test` it detected (they are the gates — they must
+exit 0 on a healthy tree) and commit the file yourself. Orca never commits for you.
+
+**5. Check it** — a zero-cost preflight, then the TUI:
+
+    orca doctor    # environment, config, and vault checks — exit 0 means ready
+    orca           # full-screen TUI (or `orca --help` for the subcommands)
+
 ## Pinned tool versions
 
 | Tool | Version | Notes |
