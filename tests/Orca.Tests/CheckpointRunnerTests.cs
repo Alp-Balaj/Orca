@@ -605,6 +605,73 @@ public sealed class CheckpointRunnerTests : IDisposable
     }
 
     [Fact]
+    public void Classify_reports_ready_with_the_facts_prompt_assembly_needs()
+    {
+        var readiness = Runner(new FakeExecutor(_repo)).Classify(null, null);
+
+        var ready = Assert.IsType<CheckpointReadiness.Ready>(readiness);
+        Assert.Equal("01-tag-entity", ready.Checkpoint.Id);
+        Assert.Equal(0, ready.CheckpointIndex);
+        Assert.Equal(1, ready.Attempt);
+        Assert.Equal("orca/recipe-tagging/01-tag-entity", ready.Branch);
+        Assert.False(ready.BranchExists);
+        Assert.False(ready.PendingDecision);
+        Assert.True(ready.Feedback.IsEmpty);
+    }
+
+    [Fact]
+    public void Classify_returns_a_blocked_reason_instead_of_throwing()
+    {
+        File.WriteAllText(
+            Path.Combine(_vault, "Plans", "recipe-tagging", "recipe-tagging.md"),
+            PlanText.Replace("status: pending", "status: complete"));
+
+        var readiness = Runner(new FakeExecutor(_repo)).Classify(null, null);
+
+        var blocked = Assert.IsType<CheckpointReadiness.NoPendingCheckpoints>(readiness);
+        Assert.Equal("recipe-tagging", blocked.PlanId);
+    }
+
+    [Fact]
+    public async Task Classify_names_the_evidence_behind_complete_by_evidence_and_honors_the_override()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+
+        var blocked = Assert.IsType<CheckpointReadiness.CompleteByEvidence>(runner.Classify(null, "01-tag-entity"));
+        Assert.Equal(CompletionEvidenceKind.ApprovalCommit, blocked.Evidence);
+        Assert.Equal("orca/recipe-tagging/01-tag-entity", blocked.Branch);
+
+        Assert.IsType<CheckpointReadiness.Ready>(
+            runner.Classify(null, "01-tag-entity", overrideCompleteByEvidence: true));
+    }
+
+    [Fact]
+    public async Task Classify_names_the_unmerged_dependency()
+    {
+        var runner = Runner(new FakeExecutor(_repo));
+        var first = await runner.RunAsync(runner.Prepare(null, "01-tag-entity"));
+        runner.Approve(first.Preview, first.Execution.Result!.TotalCostUsd);
+
+        var blocked = Assert.IsType<CheckpointReadiness.UnmergedDependency>(runner.Classify(null, "02-endpoints"));
+        Assert.Equal("01-tag-entity", blocked.DependencyId);
+        Assert.Equal("orca/recipe-tagging/01-tag-entity", blocked.DependencyBranch);
+        Assert.Equal("main", blocked.BaseBranch);
+    }
+
+    [Fact]
+    public void Prepare_refusals_carry_the_structured_reason_and_its_exact_message()
+    {
+        var e = Assert.Throws<CheckpointRunException>(() =>
+            Runner(new FakeExecutor(_repo)).Prepare(null, "09-nope"));
+
+        var blocked = Assert.IsType<CheckpointReadiness.CheckpointNotFound>(e.Blocked);
+        Assert.Equal("09-nope", blocked.CheckpointId);
+        Assert.Equal(blocked.Message, e.Message);
+    }
+
+    [Fact]
     public void Prepare_appends_the_latest_findings_to_the_prompt()
     {
         // Prior findings live in the vault (spec §8: the Reflexion memory), possibly

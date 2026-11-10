@@ -61,6 +61,13 @@ public sealed class CheckpointRunSession(
         bool overrideCompleteByEvidence = false, bool overrideUnmergedBase = false) =>
         _runner.Prepare(planId, checkpointId, overrideCompleteByEvidence, overrideUnmergedBase);
 
+    /// <summary>Read-only; delegates to CheckpointRunner.Classify — whether the checkpoint
+    /// may run, as a structured reason, without assembling the prompt or throwing.</summary>
+    public CheckpointReadiness Classify(
+        string? planId, string? checkpointId,
+        bool overrideCompleteByEvidence = false, bool overrideUnmergedBase = false) =>
+        _runner.Classify(planId, checkpointId, overrideCompleteByEvidence, overrideUnmergedBase);
+
     public async Task<CheckpointSessionResult> ExecuteAsync(
         CheckpointRunPreview preview,
         ICheckpointGate gate,

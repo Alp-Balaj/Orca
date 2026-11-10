@@ -7,8 +7,18 @@ using Orca.Core.Vault;
 
 namespace Orca.Core.Run;
 
-/// <summary>A checkpoint run was refused — wrong plan/checkpoint state, not a bug.</summary>
-public class CheckpointRunException(string message) : Exception(message);
+/// <summary>A checkpoint run was refused — wrong plan/checkpoint state, not a bug. When
+/// the refusal came from <see cref="CheckpointRunner.Classify"/>, <see cref="Blocked"/>
+/// carries the structured reason (the message is its <see cref="CheckpointReadiness.Blocked.Message"/>).</summary>
+public class CheckpointRunException : Exception
+{
+    public CheckpointRunException(string message) : base(message) { }
+
+    public CheckpointRunException(CheckpointReadiness.Blocked blocked) : base(blocked.Message) =>
+        Blocked = blocked;
+
+    public CheckpointReadiness.Blocked? Blocked { get; }
+}
 
 /// <summary>Everything one checkpoint run would do, computed without mutating anything —
 /// what <c>--dry-run</c> prints and what <see cref="CheckpointRunner.RunAsync"/> executes.</summary>
@@ -70,12 +80,16 @@ public sealed class CheckpointRunner(
     private readonly RunLogLayout _logLayout = new(stateRepoRoot ?? workspace.RepoRoot);
     private readonly RunStateStore _stateStore = new(stateRepoRoot ?? workspace.RepoRoot);
 
-    /// <summary>Read-only planning of the run: resolves plan and checkpoint, computes
-    /// attempt number, branch, prompt, and the exact argv. Throws instead of guessing.
+    /// <summary>Read-only: decides whether this checkpoint may run, from the evidence alone
+    /// (plan, vault records, run logs, run state, git). Returns <see cref="CheckpointReadiness.Ready"/>
+    /// or the first <see cref="CheckpointReadiness.Blocked"/> reason, checked in this order:
+    /// plan status → checkpoint selection → dependencies → state/vault conflict → branch
+    /// without history → complete by evidence → unmerged dependency → attempt ceiling.
     /// <paramref name="overrideCompleteByEvidence"/> and <paramref name="overrideUnmergedBase"/>
-    /// let a human deliberately proceed past the two guards below instead of fixing the
-    /// underlying state first.</summary>
-    public CheckpointRunPreview Prepare(
+    /// let a human deliberately proceed past those two guards. Vault/plan read failures
+    /// and missing required config still throw — they are environment problems, not
+    /// readiness.</summary>
+    public CheckpointReadiness Classify(
         string? planId, string? checkpointId,
         bool overrideCompleteByEvidence = false, bool overrideUnmergedBase = false)
     {
@@ -84,10 +98,13 @@ public sealed class CheckpointRunner(
         var plan = reader.ReadPlan(resolvedPlanId);
 
         if (plan.Status is not (PlanStatus.Approved or PlanStatus.InProgress))
-            throw new CheckpointRunException(
-                $"plan '{plan.PlanId}' has status '{SchemaEnums.ToYaml(plan.Status)}' — only approved or in_progress plans can run checkpoints");
+            return new CheckpointReadiness.PlanNotRunnable(plan.PlanId, plan.Status);
 
-        var (checkpoint, index) = SelectCheckpoint(plan, checkpointId);
+        var selection = SelectCheckpoint(plan, checkpointId);
+        if (selection.Blocked is { } notSelectable)
+            return notSelectable;
+        var checkpoint = selection.Checkpoint!;
+        var index = selection.Index;
 
         // SUG-03 stage A: depends_on is the truth, even for an explicit selection —
         // running a checkpoint whose dependencies aren't done builds on work that
@@ -107,10 +124,7 @@ public sealed class CheckpointRunner(
                 })
                 .ToList();
             if (blockers.Count > 0)
-                throw new CheckpointRunException(
-                    $"checkpoint '{checkpoint.Id}' depends on {string.Join(", ", blockers.Select(b => $"'{b}'"))}, " +
-                    "not yet complete (no completed status, no approval commit) — run those first, " +
-                    "or correct the plan's depends_on if it overstates the coupling");
+                return new CheckpointReadiness.DependenciesIncomplete(checkpoint.Id, blockers);
         }
 
         // The Reflexion loop's memory: the latest findings for this checkpoint ride the
@@ -135,24 +149,14 @@ public sealed class CheckpointRunner(
         // machine's state never learned about, and blindly trusting the state's lower
         // number would reuse an attempt the vault already has a record for.
         if (state?.CheckpointId == checkpoint.Id && vaultAttempt > stateAttempt)
-            throw new CheckpointRunException(
-                $"run state says checkpoint '{checkpoint.Id}' is on attempt {stateAttempt}, but the vault's " +
-                $"verification/reconciliation records already show attempt {vaultAttempt} — refusing to guess " +
-                "which is right. Likely causes: a different checkpoint ran in between and this state was never " +
-                "updated, a second machine advanced this checkpoint independently, or .orca/state was deleted " +
-                "and partially restored. Recommended action: inspect the vault records for this checkpoint and " +
-                "either restore a consistent .orca/state or remove the stale one — there is no override for " +
-                "this check.");
+            return new CheckpointReadiness.StateConflict(checkpoint.Id, stateAttempt, vaultAttempt);
         var attempt = AttemptTruth.NextAttempt(stateAttempt, verifications, reconciliations, runLogAttempts);
 
         var branch = CheckpointBranch.Name(plan.PlanId, checkpoint.Id);
         var branchExists = workspace.BranchExists(branch);
 
         if (branchExists && attempt == 1)
-            throw new CheckpointRunException(
-                $"branch '{branch}' already exists but neither run state nor the vault shows a prior attempt " +
-                $"for checkpoint '{checkpoint.Id}' — restore .orca/state if it was removed by mistake, or " +
-                "inspect the branch's contents before continuing");
+            return new CheckpointReadiness.BranchWithoutHistory(checkpoint.Id, branch);
 
         var pendingDecision = branchExists
             && state?.CheckpointId == checkpoint.Id
@@ -181,16 +185,12 @@ public sealed class CheckpointRunner(
                 && latestRejection?.Attempt != verifications[^1].Attempt;
 
             if (approvalCommitAtHead || latestVerificationPasses)
-            {
-                var reason = approvalCommitAtHead
-                    ? $"branch '{branch}' already has an Orca approval commit for it"
-                    : $"attempt {verifications[^1].Attempt} already has a passing verification record";
-                throw new CheckpointRunException(
-                    $"checkpoint '{checkpoint.Id}' looks complete by evidence ({reason}), but " +
-                    $"{_layout.PlanFile(plan.PlanId)} still lists it as status: pending — likely a forgotten " +
-                    "status flip rather than an intentional re-run. Edit that file to mark the checkpoint " +
-                    "complete, or pass --override-complete-by-evidence to run it again anyway.");
-            }
+                return new CheckpointReadiness.CompleteByEvidence(
+                    checkpoint.Id,
+                    _layout.PlanFile(plan.PlanId),
+                    approvalCommitAtHead ? CompletionEvidenceKind.ApprovalCommit : CompletionEvidenceKind.PassingVerification,
+                    branch,
+                    verifications.Count > 0 ? verifications[^1].Attempt : 0);
         }
 
         // A dependency may have been approved without its branch ever being merged into
@@ -208,13 +208,7 @@ public sealed class CheckpointRunner(
                 if (workspace.BranchExists(depBranch)
                     && IsApprovalCommit(workspace.CommitSubject(depBranch), plan.PlanId, depId)
                     && !workspace.IsAncestor(depBranch, plan.BaseBranch))
-                {
-                    throw new CheckpointRunException(
-                        $"checkpoint '{depId}' was approved on '{depBranch}', but that branch " +
-                        $"is not yet merged into base branch '{plan.BaseBranch}' — this checkpoint would build on " +
-                        $"top of unmerged work. Merge it first: git switch {plan.BaseBranch} && git merge " +
-                        $"{depBranch} — or pass --override-unmerged-base to proceed anyway.");
-                }
+                    return new CheckpointReadiness.UnmergedDependency(depId, depBranch, plan.BaseBranch);
             }
         }
 
@@ -230,19 +224,35 @@ public sealed class CheckpointRunner(
             ?? throw new ConfigException(
                 $"maxCheckpointAttempts is required to run checkpoints (the spec §8 verification-retry ceiling) — set it in {config.RepoConfigPath} or {config.GlobalConfigPath}");
         if (!pendingDecision && attempt > maxAttempts)
-            throw new CheckpointRunException(
-                $"attempt {attempt} would exceed maxCheckpointAttempts={maxAttempts} for checkpoint '{checkpoint.Id}' — " +
-                $"review the verification findings in the vault and revise the plan or its criteria, or raise the ceiling in {config.RepoConfigPath}");
+            return new CheckpointReadiness.AttemptsExhausted(checkpoint.Id, attempt, maxAttempts, config.RepoConfigPath);
+
+        return new CheckpointReadiness.Ready(
+            plan, checkpoint, index, attempt, branch, branchExists, pendingDecision,
+            new AttemptFeedback
+            {
+                Verification = verifications.Count > 0 ? verifications[^1] : null,
+                Reconciliation = reconciliations.Count > 0 ? reconciliations[^1] : null,
+                Rejection = latestRejection,
+            });
+    }
+
+    /// <summary>Read-only planning of the run: <see cref="Classify"/> decides whether it
+    /// may run (a <see cref="CheckpointReadiness.Blocked"/> result throws a
+    /// <see cref="CheckpointRunException"/> carrying it), then this assembles the prompt,
+    /// options and exact argv. Throws instead of guessing.</summary>
+    public CheckpointRunPreview Prepare(
+        string? planId, string? checkpointId,
+        bool overrideCompleteByEvidence = false, bool overrideUnmergedBase = false)
+    {
+        var readiness = Classify(planId, checkpointId, overrideCompleteByEvidence, overrideUnmergedBase);
+        if (readiness is CheckpointReadiness.Blocked blocked)
+            throw new CheckpointRunException(blocked);
+
+        var (plan, checkpoint, index, attempt, branch, branchExists, pendingDecision, feedback) =
+            (CheckpointReadiness.Ready)readiness;
 
         var childNotePath = _layout.ChildNoteFile(plan.PlanId, checkpoint.Id);
-        var childNote = File.Exists(childNotePath) ? reader.ReadChildNote(plan, checkpoint.Id) : null;
-
-        var feedback = new AttemptFeedback
-        {
-            Verification = verifications.Count > 0 ? verifications[^1] : null,
-            Reconciliation = reconciliations.Count > 0 ? reconciliations[^1] : null,
-            Rejection = latestRejection,
-        };
+        var childNote = File.Exists(childNotePath) ? new VaultReader(_layout).ReadChildNote(plan, checkpoint.Id) : null;
 
         var prompt = CheckpointPrompt.Assemble(
             plan, checkpoint, childNote, feedback.IsEmpty ? null : feedback,
@@ -448,20 +458,20 @@ public sealed class CheckpointRunner(
         commitSubject is not null
         && commitSubject.StartsWith($"orca: {planId}/{checkpointId} attempt ", StringComparison.Ordinal);
 
-    private static (Checkpoint Checkpoint, int Index) SelectCheckpoint(Plan plan, string? checkpointId)
+    private readonly record struct Selection(Checkpoint? Checkpoint, int Index, CheckpointReadiness.Blocked? Blocked);
+
+    private static Selection SelectCheckpoint(Plan plan, string? checkpointId)
     {
         if (checkpointId is not null)
         {
             var index = plan.Checkpoints.ToList().FindIndex(c => c.Id == checkpointId);
             if (index < 0)
-                throw new CheckpointRunException(
-                    $"plan '{plan.PlanId}' has no checkpoint '{checkpointId}'");
+                return new(null, -1, new CheckpointReadiness.CheckpointNotFound(plan.PlanId, checkpointId));
             var checkpoint = plan.Checkpoints[index];
             if (checkpoint.Status is not (CheckpointStatus.Pending or CheckpointStatus.InProgress or CheckpointStatus.Rejected))
-                throw new CheckpointRunException(
-                    $"checkpoint '{checkpointId}' has status '{SchemaEnums.ToYaml(checkpoint.Status)}' — only pending, in_progress, or rejected checkpoints can run");
+                return new(null, -1, new CheckpointReadiness.CheckpointNotRunnable(checkpointId, checkpoint.Status));
 
-            return (checkpoint, index);
+            return new(checkpoint, index, null);
         }
 
         // Default selection: the first READY pending checkpoint — pending with every
@@ -470,18 +480,15 @@ public sealed class CheckpointRunner(
         if (ready.Count > 0)
         {
             var first = ready[0];
-            return (first, plan.Checkpoints.ToList().FindIndex(c => c.Id == first.Id));
+            return new(first, plan.Checkpoints.ToList().FindIndex(c => c.Id == first.Id), null);
         }
 
         var pending = plan.Checkpoints.Where(c => c.Status == CheckpointStatus.Pending).ToList();
         if (pending.Count > 0)
-            throw new CheckpointRunException(
-                $"plan '{plan.PlanId}' has pending checkpoints but none are ready: " +
-                string.Join("; ", pending.Select(c =>
-                    $"'{c.Id}' waits on {string.Join(", ", CheckpointGraph.IncompleteDependencies(plan, c))}")) +
-                " — complete (and merge) a dependency first");
+            return new(null, -1, new CheckpointReadiness.NoneReady(
+                plan.PlanId,
+                [.. pending.Select(c => new WaitingCheckpoint(c.Id, CheckpointGraph.IncompleteDependencies(plan, c)))]));
 
-        throw new CheckpointRunException(
-            $"plan '{plan.PlanId}' has no pending checkpoints — pass --checkpoint to re-run a specific one");
+        return new(null, -1, new CheckpointReadiness.NoPendingCheckpoints(plan.PlanId));
     }
 }
